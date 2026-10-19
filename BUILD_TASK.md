@@ -11,10 +11,11 @@ Do
 3. `pio run`, then esptool merge_bin into docs/firmware/aquarium.bin with --flash_mode dio --flash_freq keep --flash_size keep; verify header byte offset 2 == 0x02. Add docs/index.html flasher page adapted from Feenove-104S/docs/index.html (single firmware option).
 4. Measure what you can (e.g. compute frame time via serial logging only if hardware access exists - it does not; so instead host-side estimate or code-level reasoning) and state clearly in the final report what is NOT verified on real hardware.
 5. If the build fails or performance looks poor, try to fix it yourself (a few attempts), then stop.
-6. Commit locally on branch main of the new repo with clear messages ending with the line: Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+6. Commit on branch main of the new repo with clear messages ending with the line: Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>. Tag each working milestone with an annotated semver tag (first working build = v0.1.0), and push main plus tags to origin (https://github.com/Grey-Lancaster/CYD-and-Freenove-Fish-Tank). Grey explicitly authorized commit, tag and push for THIS repo only. Never push a build that failed to compile or whose merged-bin header check failed.
+7. Build the browser flasher site under docs/ (index.html + firmware/aquarium.bin, plus a version label matching the tag), adapted from Feenove-104S/docs/index.html, so GitHub Pages can serve it at https://grey-lancaster.github.io/CYD-and-Freenove-Fish-Tank/ . Pages must be enabled by Grey in repo settings (gh is not installed); say so in the report. After pushing, verify with sha256sum that the pushed docs/firmware/aquarium.bin matches the local one (compare against raw.githubusercontent.com).
 
 Hard rules
-- Do NOT push anywhere, do NOT create remotes, do NOT touch Feenove-104S, no sudo, no installing system packages (a python venv or pio packages are fine).
+- Push only to origin of the Feenove-Aquarium repo (no other remotes or repos), do NOT touch Feenove-104S, no sudo, no installing system packages (a python venv or pio packages are fine).
 - Never run firmware builds anywhere except greyhound (you are on it).
 - Write a short report to /home/grey/Documents/Feenove-Aquarium/BUILD_REPORT.md (what was built, what works, what is unverified, exact next steps for Grey: flash from boron via the Pages-style page after he creates the GitHub repo).
 - When finished or stuck, send Grey a WhatsApp summary if the hass-mcp tools are available (notify.send_message -> notify.whatsigram_recipient_1); if they are not available, just make sure BUILD_REPORT.md exists.
