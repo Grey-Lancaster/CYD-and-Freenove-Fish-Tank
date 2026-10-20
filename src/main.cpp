@@ -43,6 +43,7 @@ volatile int g_vol = 60;       // 0..100 (60 = the original loop level)
 volatile bool g_snd = true;
 int g_rot = 3;                 // 3 = USB on the left, 1 = USB on the right
 float g_fps = 0;
+bool g_h24 = false;           // 24-hour clock
 bool g_auto = false;           // automatic feeding
 int g_aint = 60;               // seconds between automatic feeds
 String g_host = HOSTNAME;      // mDNS / OTA / DHCP name (editable on the web page)
@@ -92,7 +93,7 @@ static void applySound() {
 
 static void saveSettings() {
   prefs.putInt("rot", g_rot); prefs.putBool("snd", g_snd); prefs.putInt("vol", g_vol);
-  prefs.putBool("afeed", g_auto); prefs.putInt("aint", g_aint);
+  prefs.putBool("afeed", g_auto); prefs.putInt("aint", g_aint); prefs.putBool("h24", g_h24);
 }
 
 static void audioStart() {
@@ -319,23 +320,30 @@ static void initClock() {
 }
 
 static void drawClock() {
-  int h, m;
+  int h, mi;
+  char date[24] = "";
   struct tm tmv;
   if (getLocalTime(&tmv, 0)) {
-    h = tmv.tm_hour; m = tmv.tm_min;
+    h = tmv.tm_hour; mi = tmv.tm_min;
+    static const char *dn[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    snprintf(date, sizeof(date), "%s %02d/%02d/%02d", dn[tmv.tm_wday], tmv.tm_mon + 1, tmv.tm_mday, tmv.tm_year % 100);
   } else {
     uint32_t s = (baseSecs + millis() / 1000) % 86400;
-    h = s / 3600; m = (s / 60) % 60;
+    h = s / 3600; mi = (s / 60) % 60;
   }
-  const char *ap = h >= 12 ? "PM" : "AM";
-  int h12 = h % 12; if (h12 == 0) h12 = 12;
   char buf[16];
-  snprintf(buf, sizeof(buf), "%d:%02d %s", h12, m, ap);
+  if (g_h24) snprintf(buf, sizeof(buf), "%02d:%02d", h, mi);
+  else {
+    int h12 = h % 12; if (h12 == 0) h12 = 12;
+    snprintf(buf, sizeof(buf), "%d:%02d %s", h12, mi, h >= 12 ? "PM" : "AM");
+  }
   frame.setTextDatum(TR_DATUM);
   frame.setTextColor(RGB(10, 40, 80));
   frame.drawString(buf, SW - 9, 9, 4);
+  if (date[0]) frame.drawString(date, SW - 9, 37, 2);
   frame.setTextColor(RGB(235, 245, 255));
   frame.drawString(buf, SW - 10, 8, 4);
+  if (date[0]) frame.drawString(date, SW - 10, 36, 2);
 }
 
 // ------------------------------------------------------------- behaviour
@@ -416,6 +424,7 @@ button{background:#2fb36b;color:#fff}small{color:#9cc4e4}</style></head><body><m
 <h1>&#128032; Fish Tank</h1><small id="st">loading&hellip;</small>
 <div class="c"><label>Sound <input type="checkbox" id="snd"></label>
 <label>Volume <input type="range" id="vol" min="0" max="100"><span id="vv"></span></label>
+<label>24-hour time <input type="checkbox" id="h24"></label>
 <label>Screen rotation <select id="rot"><option value="3">USB on left</option><option value="1">USB on right</option></select></label></div>
 <div class="c"><button id="feed">Feed the fish</button>
 <label style="margin-top:14px">Auto feed <input type="checkbox" id="auto"></label>
@@ -427,11 +436,11 @@ button{background:#2fb36b;color:#fff}small{color:#9cc4e4}</style></head><body><m
 <script>
 const $=i=>document.getElementById(i);let busy=0,dirty=0;
 async function load(){const s=await (await fetch('/api/status')).json();
- if(!busy&&!dirty){$('auto').checked=s.auto;$('aint').value=s.aint;if(document.activeElement!==$('host'))$('host').value=s.host;$('hl').textContent=s.host;$('snd').checked=s.snd;$('vol').value=s.vol;$('vv').textContent=s.vol;$('rot').value=s.rot}
- $('st').textContent='v'+s.ver+' · '+s.ip+' · '+s.rssi+' dBm · up '+Math.floor(s.up/60)+' min · '+s.fps.toFixed(1)+' fps'}
-async function send(){busy=1;await fetch('/api/set?snd='+($('snd').checked?1:0)+'&vol='+$('vol').value+'&rot='+$('rot').value+'&auto='+($('auto').checked?1:0)+'&aint='+$('aint').value,{method:'POST'});busy=0;dirty=0;$('amsg').textContent='Applied \u2713'}
+ if(!busy&&!dirty){$('h24').checked=s.h24;$('auto').checked=s.auto;$('aint').value=s.aint;if(document.activeElement!==$('host'))$('host').value=s.host;$('hl').textContent=s.host;$('snd').checked=s.snd;$('vol').value=s.vol;$('vv').textContent=s.vol;$('rot').value=s.rot}
+ $('st').textContent='v'+s.ver+' · WiFi '+(s.ssid||'?')+' · '+s.ip+' · '+s.rssi+' dBm · up '+Math.floor(s.up/60)+' min · '+s.fps.toFixed(1)+' fps'}
+async function send(){busy=1;await fetch('/api/set?snd='+($('snd').checked?1:0)+'&vol='+$('vol').value+'&rot='+$('rot').value+'&h24='+($('h24').checked?1:0)+'&auto='+($('auto').checked?1:0)+'&aint='+$('aint').value,{method:'POST'});busy=0;dirty=0;$('amsg').textContent='Applied \u2713'}
 const mark=()=>{dirty=1;$('amsg').textContent='not applied yet'};
-['snd','auto','aint','rot'].forEach(i=>$(i).onchange=mark);$('vol').oninput=()=>{$('vv').textContent=$('vol').value;mark()};$('apply').onclick=send;
+['snd','h24','auto','aint','rot'].forEach(i=>$(i).onchange=mark);$('vol').oninput=()=>{$('vv').textContent=$('vol').value;mark()};$('apply').onclick=send;
 $('feed').onclick=()=>fetch('/api/feed',{method:'POST'});
 $('hsave').onclick=async()=>{const h=$('host').value.trim().toLowerCase();
  const r=await fetch('/api/host?host='+encodeURIComponent(h),{method:'POST'});
@@ -444,9 +453,11 @@ load();setInterval(load,5000);
 </script></main></body></html>)HTML";
 
 static String statusJson() {
-  char b[300];
-  snprintf(b, sizeof(b), "{\"snd\":%s,\"vol\":%d,\"rot\":%d,\"auto\":%s,\"aint\":%d,\"host\":\"%s\",\"ver\":\"" FW_VERSION "\",\"ip\":\"%s\",\"rssi\":%d,\"up\":%lu,\"fps\":%.1f}",
-           g_snd ? "true" : "false", (int)g_vol, g_rot, g_auto ? "true" : "false", g_aint, g_host.c_str(), WiFi.localIP().toString().c_str(), WiFi.RSSI(), millis() / 1000UL, g_fps);
+  String ssid = WiFi.status() == WL_CONNECTED ? WiFi.SSID() : String("");
+  ssid.replace("\\", ""); ssid.replace("\"", "");
+  char b[420];
+  snprintf(b, sizeof(b), "{\"h24\":%s,\"ssid\":\"%s\",\"snd\":%s,\"vol\":%d,\"rot\":%d,\"auto\":%s,\"aint\":%d,\"host\":\"%s\",\"ver\":\"" FW_VERSION "\",\"ip\":\"%s\",\"rssi\":%d,\"up\":%lu,\"fps\":%.1f}",
+           g_h24 ? "true" : "false", ssid.c_str(), g_snd ? "true" : "false", (int)g_vol, g_rot, g_auto ? "true" : "false", g_aint, g_host.c_str(), WiFi.localIP().toString().c_str(), WiFi.RSSI(), millis() / 1000UL, g_fps);
   return String(b);
 }
 
@@ -468,6 +479,7 @@ static void setupWeb() {
   server.on("/api/set", HTTP_ANY, []() {
     if (server.hasArg("vol")) g_vol = constrain(server.arg("vol").toInt(), 0, 100);
     if (server.hasArg("snd")) g_snd = server.arg("snd").toInt() != 0;
+    if (server.hasArg("h24")) g_h24 = server.arg("h24").toInt() != 0;
     if (server.hasArg("auto")) g_auto = server.arg("auto").toInt() != 0;
     if (server.hasArg("aint")) g_aint = constrain(server.arg("aint").toInt(), 5, 3600);
     if (server.hasArg("rot")) {
@@ -514,7 +526,7 @@ void setup() {
   Serial.begin(115200);
   prefs.begin("tank", false);
   g_rot = prefs.getInt("rot", 3); g_snd = prefs.getBool("snd", true); g_vol = prefs.getInt("vol", 60);
-  g_auto = prefs.getBool("afeed", false); g_aint = prefs.getInt("aint", 60); g_host = prefs.getString("host", HOSTNAME);
+  g_auto = prefs.getBool("afeed", false); g_aint = prefs.getInt("aint", 60); g_h24 = prefs.getBool("h24", false); g_host = prefs.getString("host", HOSTNAME);
   pinMode(0, INPUT_PULLUP);        // BOOT button
   audioStart();          // must run before ft6336u.begin(): both share I2C on GPIO 15/16
   ft6336u.begin();
