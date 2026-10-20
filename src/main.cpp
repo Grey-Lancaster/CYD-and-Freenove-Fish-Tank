@@ -294,9 +294,9 @@ static void initClock() {
   sscanf(__TIME__, "%d:%d:%d", &h, &m, &s);
   baseSecs = h * 3600 + m * 60 + s;
 #ifdef WIFI_SSID
+  WiFi.setHostname(g_host.c_str());      // must come before WiFi.mode() or DHCP still sends the default name
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
-  WiFi.setHostname(g_host.c_str());
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   uint32_t t0 = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - t0 < 8000) delay(100);
