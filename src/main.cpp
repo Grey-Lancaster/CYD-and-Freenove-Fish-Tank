@@ -11,6 +11,8 @@
 #include <Preferences.h>
 #include <time.h>
 #include <Update.h>
+#include <sys/time.h>
+#include "esp_sntp.h"
 #include "board.h"
 #include "canvas.h"
 #include "hal.h"
@@ -18,7 +20,7 @@
 #include "motion.h"
 #include "wifi_setup.h"
 
-#define FW_VERSION "1.4.0"
+#define FW_VERSION "1.4.1"
 
 TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite frame = TFT_eSprite(&tft);    // Freenove: the whole frame
@@ -467,7 +469,8 @@ button,.b{background:#2fb36b;color:#fff;text-decoration:none;border-radius:8px;p
 <option value="AEST-10AEDT,M10.1.0,M4.1.0/3">Australia East</option><option value="UTC0">UTC</option></select></label>
 <label>Date format <select id="dfmt"><option value="0">Tue 10/20/26 (month/day)</option><option value="1">Tue 20/10/26 (day/month)</option>
 <option value="2">Tue 2026-10-20</option><option value="3">Tue, Oct 20</option><option value="4">Hide the date</option></select></label>
-<label>24-hour time <input type="checkbox" id="h24"></label></div>
+<label>24-hour time <input type="checkbox" id="h24"></label>
+<button id="settime">Set time from this device</button> <small id="tmsg"></small></div>
 <div class="c"><button id="shot">Screenshot</button> <label style="display:inline"><input type="checkbox" id="live"> live view</label>
 <small id="shm"> (the tank pauses for a second while it copies)</small>
 <canvas id="cv" width="480" height="320" style="display:none;width:100%;margin-top:10px;border-radius:8px"></canvas>
@@ -492,7 +495,8 @@ const $=i=>document.getElementById(i);let busy=0,dirty=0;
 async function load(){const s=await (await fetch('/api/status')).json();
  $('mlive').textContent=s.motion?(s.mready?'motion score '+s.mscore+(s.mon?' \u25cf moving':' (quiet)')+(s.asleep?' \u00b7 screen asleep':''):'sensor warming up\u2026'):'';
 window.envId=s.env;$('recal').style.display=s.board=='cyd'?'inline-block':'none';
-$('now').textContent=s.now;
+$('now').textContent=s.now+(s.ntp?'  (internet time)':'');
+if(!s.ntp&&!window.timeSent){window.timeSent=1;fetch('/api/settime?epoch='+Math.floor(Date.now()/1000),{method:'POST'})}
 if(!busy&&!dirty){$('tz').value=s.tz;$('dfmt').value=s.dfmt;$('inv').checked=s.inv;$('swaprb').checked=s.swaprb;$('motion').checked=s.motion;$('mmin').value=s.mmin;$('msens').value=s.msens;$('h24').checked=s.h24;$('auto').checked=s.auto;$('aint').value=s.aint;if(document.activeElement!==$('host'))$('host').value=s.host;$('hl').textContent=s.host;$('snd').checked=s.snd;$('vol').value=s.vol;$('vv').textContent=s.vol;$('rot').value=s.rot}
  $('st').textContent='v'+s.ver+' · WiFi '+(s.ssid||'?')+' · '+s.ip+' · '+s.rssi+' dBm · up '+Math.floor(s.up/60)+' min · '+s.fps.toFixed(1)+' fps'}
 async function send(){busy=1;await fetch('/api/set?snd='+($('snd').checked?1:0)+'&vol='+$('vol').value+'&rot='+$('rot').value+'&motion='+($('motion').checked?1:0)+'&mmin='+$('mmin').value+'&msens='+$('msens').value+'&inv='+($('inv').checked?1:0)+'&swaprb='+($('swaprb').checked?1:0)+'&tz='+encodeURIComponent($('tz').value)+'&dfmt='+$('dfmt').value+'&h24='+($('h24').checked?1:0)+'&auto='+($('auto').checked?1:0)+'&aint='+$('aint').value,{method:'POST'});busy=0;dirty=0;$('amsg').textContent='Applied \u2713'}
@@ -518,6 +522,7 @@ $('fwb').onclick=()=>{const f=$('fw').files[0];if(!f){$('fwmsg').textContent='ch
  x.upload.onprogress=e=>$('fwmsg').textContent=Math.round(e.loaded*100/e.total)+'%';
  x.onload=()=>{$('fwmsg').textContent=x.status==200?'Done. Restarting\u2026 reload this page in a few seconds.':'Update failed ('+x.responseText+')'};
  x.onerror=()=>$('fwmsg').textContent='connection lost (it may be restarting)';x.send(fd)};
+$('settime').onclick=async()=>{await fetch('/api/settime?epoch='+Math.floor(Date.now()/1000),{method:'POST'});$('tmsg').textContent='time set \u2713';load()};
 $('chest').onclick=()=>fetch('/api/chest',{method:'POST'});
 $('feed').onclick=()=>fetch('/api/feed',{method:'POST'});
 $('hsave').onclick=async()=>{const h=$('host').value.trim().toLowerCase();
@@ -531,13 +536,25 @@ load();setInterval(load,5000);
 </script></main></body></html>)HTML";
 
 
+// The boards have no battery clock. Time comes from NTP, from a device's browser (web page) or, after a restart,
+// from the last time we saved (so the clock is roughly right immediately).
+static bool timeIsSet() { struct tm t; return getLocalTime(&t, 0); }
+static void saveTimeNow() { if (timeIsSet()) prefs.putUInt("lastt", (uint32_t)time(nullptr)); }
+static void setClockEpoch(uint32_t epoch) {
+  struct timeval tv = {(time_t)epoch, 0};
+  settimeofday(&tv, nullptr);
+  saveTimeNow();
+}
+static bool ntpSynced() { return sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED; }
+
 static String statusJson() {
   String ssid = WiFi.status() == WL_CONNECTED ? WiFi.SSID() : String("");
   ssid.replace("\\", ""); ssid.replace("\"", "");
   char b[1000];
   char tbuf[16], dbuf[24];
   clockStrings(tbuf, sizeof(tbuf), dbuf, sizeof(dbuf));
-  snprintf(b, sizeof(b), "{\"tz\":\"%s\",\"dfmt\":%d,\"now\":\"%s  %s\",\"env\":\"" BOARD_ID "\",\"board\":\"%s\",\"inv\":%s,\"swaprb\":%s,\"motion\":%s,\"mmin\":%d,\"msens\":%d,\"mon\":%s,\"mready\":%s,\"mscore\":%.2f,\"asleep\":%s,\"h24\":%s,\"ssid\":\"%s\",\"snd\":%s,\"vol\":%d,\"rot\":%d,\"auto\":%s,\"aint\":%d,\"host\":\"%s\",\"ver\":\"" FW_VERSION "\",\"ip\":\"%s\",\"rssi\":%d,\"up\":%lu,\"fps\":%.1f}",
+  snprintf(b, sizeof(b), "{\"timeset\":%s,\"ntp\":%s,\"tz\":\"%s\",\"dfmt\":%d,\"now\":\"%s  %s\",\"env\":\"" BOARD_ID "\",\"board\":\"%s\",\"inv\":%s,\"swaprb\":%s,\"motion\":%s,\"mmin\":%d,\"msens\":%d,\"mon\":%s,\"mready\":%s,\"mscore\":%.2f,\"asleep\":%s,\"h24\":%s,\"ssid\":\"%s\",\"snd\":%s,\"vol\":%d,\"rot\":%d,\"auto\":%s,\"aint\":%d,\"host\":\"%s\",\"ver\":\"" FW_VERSION "\",\"ip\":\"%s\",\"rssi\":%d,\"up\":%lu,\"fps\":%.1f}",
+           timeIsSet() ? "true" : "false", ntpSynced() ? "true" : "false",
            g_tz.c_str(), g_datefmt, tbuf, dbuf,
 #ifdef BOARD_CYD28
            "cyd",
@@ -639,6 +656,12 @@ static void setupWeb() {
     else if (up.status == UPLOAD_FILE_WRITE) Update.write(up.buf, up.currentSize);
     else if (up.status == UPLOAD_FILE_END) Update.end(true);
     else if (up.status == UPLOAD_FILE_ABORTED) Update.abort();
+  });
+  server.on("/api/settime", HTTP_ANY, []() {
+    uint32_t e = (uint32_t)server.arg("epoch").toInt();
+    if (e < 1700000000UL || e > 4000000000UL) { server.send(400, "application/json", "{\"error\":\"bad time\"}"); return; }
+    setClockEpoch(e);
+    server.send(200, "application/json", statusJson());
   });
   server.on("/api/chest", HTTP_ANY, []() {
     if (chestState == CHEST_CLOSED) { chestState = CHEST_OPENING; chestT = 0; }
@@ -793,6 +816,9 @@ void setup() {
   g_invert = prefs.getBool("invert", false); g_swaprb = prefs.getBool("swaprb", DEFAULT_SWAPRB);
   g_motion = prefs.getBool("motion", false); g_mmin = constrain(prefs.getInt("mmin", 10), 1, 240); g_msens = constrain(prefs.getInt("msens", 5), 1, 10);
   g_host = prefs.getString("host", DEFAULT_HOST);
+  setenv("TZ", g_tz.c_str(), 1); tzset();
+  { uint32_t lt = prefs.getUInt("lastt", 0);                    // restore the last saved time (no battery clock)
+    if (lt > 1700000000UL) { struct timeval tv = {(time_t)lt + 5, 0}; settimeofday(&tv, nullptr); } }
   if (g_rot != 1 && g_rot != 3) g_rot = DEFAULT_ROT;
   pinMode(0, INPUT_PULLUP);        // BOOT button
   halAudioStart();                 // before the touch controller: the Freenove shares I2C with its codec
@@ -846,6 +872,10 @@ void loop() {
     if (WiFi.status() != WL_CONNECTED && now - lastWifi > 30000) { lastWifi = now; WiFi.reconnect(); }
   }
   if (restartAt && millis() > restartAt) ESP.restart();
+  static uint32_t lastSave = 0;
+  static bool savedAfterNtp = false;
+  if (!savedAfterNtp && ntpSynced()) { savedAfterNtp = true; saveTimeNow(); }
+  if (now - lastSave > 30UL * 60000UL) { lastSave = now; saveTimeNow(); }
 
   static bool lastBtn = true;
   bool btn = digitalRead(0);
