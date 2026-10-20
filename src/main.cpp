@@ -8,6 +8,9 @@
 #include <ArduinoOTA.h>
 #include <time.h>
 #include "FT6336U.h"
+#include <Wire.h>
+#include "driver/i2s.h"
+#include "es8311.h"
 #if __has_include("secrets.h")
 #include "secrets.h"
 #endif
@@ -30,6 +33,61 @@ static inline uint16_t RGB(int r, int g, int b) {
   return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
 }
 static inline uint16_t bswap16(uint16_t v) { return (v >> 8) | (v << 8); }
+
+
+// ---------------------------------------------------------------- audio
+// ES8311 codec + speaker: loops the embedded bubbles.raw (16 kHz mono int16)
+// from a core-0 task via the legacy I2S driver. Codec is fixed at 16 kHz.
+extern const uint8_t bubbles_start[] asm("_binary_src_bubbles_raw_start");
+extern const uint8_t bubbles_end[] asm("_binary_src_bubbles_raw_end");
+
+#define AP_ENABLE 1
+#define I2S_MCK 4
+#define I2S_BCK 5
+#define I2S_DINT 6
+#define I2S_DOUT 8
+#define I2S_WS 7
+
+static void audioTask(void *) {
+  const int16_t *pcm = (const int16_t *)bubbles_start;
+  const size_t n = (bubbles_end - bubbles_start) / 2;
+  static int16_t out[512];           // 256 stereo frames
+  size_t idx = 0;
+  for (;;) {
+    for (int i = 0; i < 256; i++) {
+      int16_t v = pcm[idx];
+      out[2 * i] = v; out[2 * i + 1] = v;
+      if (++idx >= n) idx = 0;
+    }
+    size_t written;
+    i2s_write(I2S_NUM_0, out, sizeof(out), &written, portMAX_DELAY);
+  }
+}
+
+static void audioStart() {
+  pinMode(AP_ENABLE, OUTPUT);
+  digitalWrite(AP_ENABLE, LOW);
+  Wire.begin(16, 15, 400000);
+  i2s_config_t cfg = {
+    .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
+    .sample_rate = EXAMPLE_SAMPLE_RATE,
+    .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
+    .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
+    .communication_format = I2S_COMM_FORMAT_STAND_I2S,
+    .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+    .dma_buf_count = 6,
+    .dma_buf_len = 256,
+    .use_apll = false,
+    .tx_desc_auto_clear = true,
+    .fixed_mclk = EXAMPLE_MCLK_FREQ_HZ
+  };
+  if (i2s_driver_install(I2S_NUM_0, &cfg, 0, NULL) != ESP_OK) { Serial.println("I2S install failed"); return; }
+  i2s_pin_config_t pins = {.mck_io_num = I2S_MCK, .bck_io_num = I2S_BCK, .ws_io_num = I2S_WS,
+                           .data_out_num = I2S_DOUT, .data_in_num = I2S_DINT};
+  i2s_set_pin(I2S_NUM_0, &pins);
+  if (es8311_codec_init() != ESP_OK) { Serial.println("ES8311 init failed"); return; }
+  xTaskCreatePinnedToCore(audioTask, "bubbles", 4096, NULL, 2, NULL, 0);
+}
 
 // ---------------------------------------------------------------- fish
 enum FishType { TANG, CLOWN, ANGEL, GOLD, NEON };
@@ -298,6 +356,7 @@ static void updateWorld(float dt, float t, uint32_t now) {
 
 void setup() {
   Serial.begin(115200);
+  audioStart();          // must run before ft6336u.begin(): both share I2C on GPIO 15/16
   ft6336u.begin();
   tft.init();
   tft.setRotation(3);   // 180 deg from rotation 1: USB port on the left
