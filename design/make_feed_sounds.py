@@ -28,6 +28,8 @@ def tick(buf,t0,amp=1.0):
         if i<len(buf): buf[i]+=amp*lp*math.exp(-t/0.008)
 # 1. ding ding
 b=[0.0]*int(1.3*SR); ding(b,0,1320); ding(b,int(0.28*SR),1760,amp=0.9); save("feed_ding_ding",b)
+# the firmware embeds this one (chosen): int16 LE raw, same level as the wav
+m=max(abs(v) for v in b); open("src/feed.raw","wb").write(struct.pack("<%dh"%len(b),*[int(v/m*9000) for v in b]))
 # 2. water plop plop
 b=[0.0]*int(0.9*SR); plop(b,0,700); plop(b,int(0.17*SR),950,amp=0.8); plop(b,int(0.33*SR),600,amp=0.6); save("feed_plop",b)
 # 3. flakes: tick-tick-tick then tiny splash

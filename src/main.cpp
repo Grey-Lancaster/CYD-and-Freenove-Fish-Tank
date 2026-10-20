@@ -61,6 +61,10 @@ static inline uint16_t bswap16(uint16_t v) { return (v >> 8) | (v << 8); }
 extern const uint8_t bubbles_start[] asm("_binary_src_bubbles_raw_start");
 extern const uint8_t bubbles_end[] asm("_binary_src_bubbles_raw_end");
 
+extern const uint8_t feed_start[] asm("_binary_src_feed_raw_start");
+extern const uint8_t feed_end[] asm("_binary_src_feed_raw_end");
+volatile size_t g_fxPos = (size_t)-1;      // feed "ding ding" playback position (-1 = idle)
+
 #define AP_ENABLE 1
 #define I2S_MCK 4
 #define I2S_BCK 5
@@ -71,11 +75,16 @@ extern const uint8_t bubbles_end[] asm("_binary_src_bubbles_raw_end");
 static void audioTask(void *) {
   const int16_t *pcm = (const int16_t *)bubbles_start;
   const size_t n = (bubbles_end - bubbles_start) / 2;
+  const int16_t *fx = (const int16_t *)feed_start;
+  const size_t fxN = (feed_end - feed_start) / 2;
   static int16_t out[512];           // 256 stereo frames
   size_t idx = 0;
   for (;;) {
     for (int i = 0; i < 256; i++) {
-      int32_t s = g_snd ? ((int32_t)pcm[idx] * g_vol) / 60 : 0;
+      int32_t s = pcm[idx];
+      size_t fp = g_fxPos;
+      if (fp < fxN) { s += ((int32_t)fx[fp] * 7) / 10; g_fxPos = fp + 1; }
+      s = g_snd ? (s * g_vol) / 60 : 0;
       if (s > 32767) s = 32767; else if (s < -32768) s = -32768;
       int16_t v = (int16_t)s;
       out[2 * i] = v; out[2 * i + 1] = v;
@@ -363,6 +372,7 @@ Ring rings[6];
 static void feedAt(float x, float y, int n) {
   for (int i = 0; i < n; i++) spawnFood(x + random(-8, 9), y + random(-4, 5));
   for (auto &r : rings) if (!r.on) { r = {x, y, 0, true}; break; }      // sonar ring
+  g_fxPos = 0;                                                          // ding ding
 }
 
 static void updateWorld(float dt, float t, uint32_t now) {
