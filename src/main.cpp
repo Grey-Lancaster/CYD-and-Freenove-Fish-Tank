@@ -87,6 +87,23 @@ Food food[16];
 struct Bubble { float x, y, v, r, ph; };
 Bubble bubbles[22];
 
+// Treasure chest on the sand: opens now and then and bubbles pour out.
+#define CHEST_X 250
+#define CHEST_BASE 303
+enum ChestState { CHEST_CLOSED, CHEST_OPENING, CHEST_OPEN, CHEST_CLOSING };
+ChestState chestState = CHEST_CLOSED;
+float chestT = 0, chestNextOpen = 8, chestBubbleT = 0;
+struct ChestBubble { float x, y, v, r, ph; bool on; };
+ChestBubble cbub[14];
+static float chestOpenness() {      // 0 closed .. 1 fully open
+  switch (chestState) {
+    case CHEST_OPENING: return min(1.0f, chestT / 1.0f);
+    case CHEST_OPEN: return 1.0f;
+    case CHEST_CLOSING: return max(0.0f, 1.0f - chestT / 1.0f);
+    default: return 0.0f;
+  }
+}
+
 struct Kelp { int x, h; float ph; };
 Kelp kelp[] = {{40,150,0},{52,110,1.5f},{430,170,2},{445,120,.5f},{300,90,3},{170,100,4}};
 
@@ -309,7 +326,26 @@ static void feedAt(float x, float y, int n) {
   audioDing();
 }
 
+static void updateChest(float dt) {
+  chestT += dt;
+  switch (chestState) {
+    case CHEST_CLOSED:  if (chestT >= chestNextOpen) { chestState = CHEST_OPENING; chestT = 0; } break;
+    case CHEST_OPENING: if (chestT >= 1.0f) { chestState = CHEST_OPEN; chestT = 0; chestBubbleT = 0; } break;
+    case CHEST_OPEN:
+      chestBubbleT += dt;
+      while (chestBubbleT > 0.11f) {
+        chestBubbleT -= 0.11f;
+        for (auto &b : cbub) if (!b.on) { b = {CHEST_X + (float)random(-14, 15), (float)(CHEST_BASE - 24), 45.0f + random(40), 2.0f + random(4), (float)random(628) / 100.0f, true}; break; }
+      }
+      if (chestT >= 4.5f) { chestState = CHEST_CLOSING; chestT = 0; }
+      break;
+    case CHEST_CLOSING: if (chestT >= 1.0f) { chestState = CHEST_CLOSED; chestT = 0; chestNextOpen = 12 + random(10); } break;
+  }
+  for (auto &b : cbub) if (b.on) { b.y -= b.v * dt; if (b.y < -6) b.on = false; }
+}
+
 static void updateWorld(float dt, float t, uint32_t now) {
+  updateChest(dt);
   static uint32_t nextFeed = 0;
   if (g_auto) {
     if (nextFeed == 0 || now >= nextFeed) {
@@ -403,7 +439,7 @@ button,.b{background:#2fb36b;color:#fff;text-decoration:none;border-radius:8px;p
 <label>Invert colours <input type="checkbox" id="inv"></label>
 <label>Swap red and blue <input type="checkbox" id="swaprb"></label>
 <small>Use these if the colours look wrong (like a photo negative, or red and blue swapped).</small></div>
-<div class="c"><button id="feed">Feed the fish</button>
+<div class="c"><button id="feed">Feed the fish</button> <button id="chest">Open the treasure chest</button>
 <label style="margin-top:14px">Auto feed <input type="checkbox" id="auto"></label>
 <label>Every (seconds) <input type="number" id="aint" min="5" max="3600" style="width:90px"></label></div>
 <div class="c"><button id="shot">Screenshot</button> <label style="display:inline"><input type="checkbox" id="live"> live view</label>
@@ -447,6 +483,7 @@ $('shot').onclick=shot;
 $('live').onchange=()=>{clearInterval(window.lv);if($('live').checked){shot();window.lv=setInterval(shot,2500)}};
 $('wifi').onclick=async()=>{if(!confirm('Forget all saved WiFi networks and restart? You will set up WiFi again on the screen.'))return;await fetch('/api/wifi/forget',{method:'POST'});$('sysmsg').textContent='Restarting\u2026'};
 $('recal').onclick=async()=>{if(!confirm('Restart and calibrate the touch screen again?'))return;await fetch('/api/recal',{method:'POST'});$('sysmsg').textContent='Restarting\u2026'};
+$('chest').onclick=()=>fetch('/api/chest',{method:'POST'});
 $('feed').onclick=()=>fetch('/api/feed',{method:'POST'});
 $('hsave').onclick=async()=>{const h=$('host').value.trim().toLowerCase();
  const r=await fetch('/api/host?host='+encodeURIComponent(h),{method:'POST'});
@@ -547,6 +584,10 @@ static void setupWeb() {
     feedAt(50 + random(VW - 100), 16, 5);
     server.send(200, "application/json", "{\"ok\":true}");
   });
+  server.on("/api/chest", HTTP_ANY, []() {
+    if (chestState == CHEST_CLOSED) { chestState = CHEST_OPENING; chestT = 0; }
+    server.send(200, "application/json", "{\"ok\":true}");
+  });
   server.on("/api/wifi/forget", HTTP_ANY, []() {
     wifiForgetAll();
     server.send(200, "application/json", "{\"ok\":true}");
@@ -607,6 +648,36 @@ static void drawInfo(uint32_t now) {
 }
 
 // Everything that moves, drawn over the background already in the canvas.
+static void drawChest() {
+  const float p = chestOpenness();
+  const float x = CHEST_X, top = CHEST_BASE - 20;
+  const uint16_t wood = RGB(135, 82, 36), woodD = RGB(88, 50, 22), gold = RGB(232, 188, 62), goldL = RGB(252, 220, 100);
+  // lid: a dome when closed, lifted and flattened when open
+  const float lidY = top - 12 * p - 1, lidRy = 12 * (1 - p) + 4, lidRx = 27 - 3 * p;
+  cv.fillEllipse(x, lidY, lidRx, lidRy, wood);
+  cv.drawEllipse(x, lidY, lidRx, lidRy, woodD);
+  cv.fillRect(x - 19, lidY - lidRy + 1, 4, lidRy * 2 - 3, gold);
+  cv.fillRect(x + 15, lidY - lidRy + 1, 4, lidRy * 2 - 3, gold);
+  // body
+  cv.fillRect(x - 27, top, 54, 20, wood);
+  cv.fillRect(x - 27, top + 6, 54, 1, woodD);
+  cv.fillRect(x - 27, top + 13, 54, 1, woodD);
+  cv.fillRect(x - 27, top, 54, 2, woodD);
+  cv.fillRect(x - 27, top + 19, 54, 1, woodD);
+  cv.fillRect(x - 19, top, 4, 20, gold);
+  cv.fillRect(x + 15, top, 4, 20, gold);
+  // dark opening with a gold glow while open
+  if (p > 0.05f) {
+    cv.fillEllipse(x, top + 1, 25, 7 * p + 1, RGB(25, 12, 5));
+    cv.fillEllipse(x, top, 17 * p, 4 * p + 1, RGB(255, 214, 95));
+    cv.fillEllipse(x - 6, top - 1, 4 * p + 1, 2 * p + 1, goldL);
+    cv.fillEllipse(x + 7, top, 4 * p + 1, 2 * p + 1, goldL);
+  }
+  // lock
+  cv.fillRect(x - 4, top + 7, 8, 8, gold);
+  cv.fillRect(x - 1, top + 10, 2, 3, woodD);
+}
+
 static void drawScene(float t, uint32_t now) {
   drawRays(t);
   for (auto &k : kelp) {
@@ -617,6 +688,7 @@ static void drawScene(float t, uint32_t now) {
       px = nx; py = ny;
     }
   }
+  drawChest();
   for (int i = 0; i < NFISH; i++) {
     Fish &f = fishes[i];
     float wag = sinf(t * 9.0f + f.ph) * 4.0f;
@@ -646,6 +718,12 @@ static void drawScene(float t, uint32_t now) {
     float bx = b.x + 5 * sinf(t * b.v * 0.08f + b.ph), by = b.y, r = b.r;
     cv.drawCircle(bx, by, r, RGB(205, 232, 255));
     cv.drawPixel(bx - r / 3, by - r / 3, TFT_WHITE);
+  }
+  for (auto &b : cbub) {
+    if (!b.on) continue;
+    float bx = b.x + 6 * sinf(t * 3.0f + b.ph + b.y * 0.05f), by = b.y;
+    cv.drawCircle(bx, by, b.r, RGB(205, 232, 255));
+    cv.drawPixel(bx - b.r / 3, by - b.r / 3, TFT_WHITE);
   }
   drawClock();
   if (infoUntil > now) drawInfo(now);
