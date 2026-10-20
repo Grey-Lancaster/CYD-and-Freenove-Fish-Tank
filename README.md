@@ -23,5 +23,11 @@ python3 ~/.platformio/packages/tool-esptoolpy/esptool.py --chip esp32s3 merge_bi
 ```
 Check byte 2 of the merged image is `0x02` (DIO; this board's octal PSRAM needs it).
 
+## Features (v1.0.0)
+Tap-to-feed (sonar ring + ding ding), auto feed, looping bubble sound, clock + date (12/24 h), BOOT info screen, rotation, and - when built with WiFi - a settings web page (`http://fishtank.local`), screenshots, OTA updates (`espota.py`, host `fishtank`), hostname config and **WiFi motion sleep** (ported from the CYD PhotoFrame project: the screen sleeps when nobody is around).
+
+## WiFi build
+Copy `src/secrets.h.example` to `src/secrets.h` (gitignored) and fill in your network, then `pio run`. The flasher page's prebuilt image has no WiFi credentials, so it has no web page, NTP or OTA.
+
 ## Status
-v0.1.0: compiles; **not yet run on hardware** (frame rate and exact look unverified). Serial prints `fps:` every 5 s.
+Runs at about 10 fps on the FNK0104S. First tested on hardware 2026-10-20.

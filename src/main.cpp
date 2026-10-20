@@ -14,11 +14,12 @@
 #include <Wire.h>
 #include "driver/i2s.h"
 #include "es8311.h"
+#include "motion.h"
 #if __has_include("secrets.h")
 #include "secrets.h"
 #endif
 
-#define FW_VERSION "0.2.0"
+#define FW_VERSION "1.0.0"
 #define HOSTNAME "fishtank"
 
 #define SW 480
@@ -43,6 +44,11 @@ volatile int g_vol = 60;       // 0..100 (60 = the original loop level)
 volatile bool g_snd = true;
 int g_rot = 3;                 // 3 = USB on the left, 1 = USB on the right
 float g_fps = 0;
+bool g_motion = false;         // Wi-Fi motion sensing: screen sleeps when nobody is around
+int g_mmin = 10;               // minutes without motion before sleeping
+int g_msens = 5;               // 1..10
+volatile bool g_asleep = false;
+static uint32_t lastActivity = 0;
 bool g_h24 = false;           // 24-hour clock
 bool g_auto = false;           // automatic feeding
 int g_aint = 60;               // seconds between automatic feeds
@@ -84,7 +90,7 @@ static void audioTask(void *) {
       int32_t s = pcm[idx];
       size_t fp = g_fxPos;
       if (fp < fxN) { s += ((int32_t)fx[fp] * 7) / 10; g_fxPos = fp + 1; }
-      s = g_snd ? (s * g_vol) / 60 : 0;
+      s = (g_snd && !g_asleep) ? (s * g_vol) / 60 : 0;
       if (s > 32767) s = 32767; else if (s < -32768) s = -32768;
       int16_t v = (int16_t)s;
       out[2 * i] = v; out[2 * i + 1] = v;
@@ -103,6 +109,7 @@ static void applySound() {
 static void saveSettings() {
   prefs.putInt("rot", g_rot); prefs.putBool("snd", g_snd); prefs.putInt("vol", g_vol);
   prefs.putBool("afeed", g_auto); prefs.putInt("aint", g_aint); prefs.putBool("h24", g_h24);
+  prefs.putBool("motion", g_motion); prefs.putInt("mmin", g_mmin); prefs.putInt("msens", g_msens);
 }
 
 static void audioStart() {
@@ -422,6 +429,37 @@ static void updateWorld(float dt, float t, uint32_t now) {
 
 
 
+
+// ---------------------------------------------------------------- motion sleep
+static void wakeScreen(uint8_t cause) {
+  if (!g_asleep) return;
+  g_asleep = false;
+  motionLogEvent(false, cause);
+  digitalWrite(TFT_BL, HIGH);
+  lastActivity = millis();
+}
+
+// With motion sensing on, the screen sleeps after g_mmin minutes without motion or touch and
+// wakes on either. If sensing is not running (offline, warming up) that counts as activity,
+// so the tank never sleeps blind.
+static void updateSleep() {
+  static uint32_t last = 0;
+  uint32_t now = millis();
+  if (now - last < 250) return;
+  last = now;
+  if (!g_motion) { wakeScreen(4); return; }
+  if (!motionReady() || motionDetected()) {
+    lastActivity = now;
+    wakeScreen(motionDetected() ? 1 : 5);
+    return;
+  }
+  if (!g_asleep && now - lastActivity >= (uint32_t)g_mmin * 60000UL) {
+    g_asleep = true;
+    motionLogEvent(true, 0);
+    digitalWrite(TFT_BL, LOW);
+  }
+}
+
 // ------------------------------------------------------------- web page
 static const char PAGE[] PROGMEM = R"HTML(<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Fish Tank</title>
@@ -443,6 +481,13 @@ button,.b{background:#2fb36b;color:#fff;text-decoration:none;border-radius:8px;p
 <small id="shm"> (the tank pauses for a second while it copies)</small>
 <canvas id="cv" width="480" height="320" style="display:none;width:100%;margin-top:10px;border-radius:8px"></canvas>
 <a id="dl" style="display:none" class="b">Download PNG</a></div>
+<div class="c"><b>Motion sleep</b> <small>(experimental)</small>
+<label>Sleep the screen when nobody is around <input type="checkbox" id="motion"></label>
+<label>Sleep after (minutes) <input type="number" id="mmin" min="1" max="240" style="width:90px"></label>
+<label>Sensitivity <input type="range" id="msens" min="1" max="10"></label>
+<small id="mlive"></small>
+<div id="mlog" style="margin-top:8px;font-size:14px"></div>
+<button id="mclr">Clear log</button></div>
 <div class="c"><button id="apply">Apply</button> <small id="amsg"></small><br><small>Applies sound, volume, rotation and auto feed.</small></div>
 <div class="c"><label>Hostname <input id="host" maxlength="31" style="width:55%"></label>
 <small>letters, digits and dashes &mdash; reachable as <b id="hl"></b>.local</small><br><br>
@@ -450,11 +495,17 @@ button,.b{background:#2fb36b;color:#fff;text-decoration:none;border-radius:8px;p
 <script>
 const $=i=>document.getElementById(i);let busy=0,dirty=0;
 async function load(){const s=await (await fetch('/api/status')).json();
- if(!busy&&!dirty){$('h24').checked=s.h24;$('auto').checked=s.auto;$('aint').value=s.aint;if(document.activeElement!==$('host'))$('host').value=s.host;$('hl').textContent=s.host;$('snd').checked=s.snd;$('vol').value=s.vol;$('vv').textContent=s.vol;$('rot').value=s.rot}
+ $('mlive').textContent=s.motion?(s.mready?'motion score '+s.mscore+(s.mon?' \u25cf moving':' (quiet)')+(s.asleep?' \u00b7 screen asleep':''):'sensor warming up\u2026'):'';
+if(!busy&&!dirty){$('motion').checked=s.motion;$('mmin').value=s.mmin;$('msens').value=s.msens;$('h24').checked=s.h24;$('auto').checked=s.auto;$('aint').value=s.aint;if(document.activeElement!==$('host'))$('host').value=s.host;$('hl').textContent=s.host;$('snd').checked=s.snd;$('vol').value=s.vol;$('vv').textContent=s.vol;$('rot').value=s.rot}
  $('st').textContent='v'+s.ver+' · WiFi '+(s.ssid||'?')+' · '+s.ip+' · '+s.rssi+' dBm · up '+Math.floor(s.up/60)+' min · '+s.fps.toFixed(1)+' fps'}
-async function send(){busy=1;await fetch('/api/set?snd='+($('snd').checked?1:0)+'&vol='+$('vol').value+'&rot='+$('rot').value+'&h24='+($('h24').checked?1:0)+'&auto='+($('auto').checked?1:0)+'&aint='+$('aint').value,{method:'POST'});busy=0;dirty=0;$('amsg').textContent='Applied \u2713'}
+async function send(){busy=1;await fetch('/api/set?snd='+($('snd').checked?1:0)+'&vol='+$('vol').value+'&rot='+$('rot').value+'&motion='+($('motion').checked?1:0)+'&mmin='+$('mmin').value+'&msens='+$('msens').value+'&h24='+($('h24').checked?1:0)+'&auto='+($('auto').checked?1:0)+'&aint='+$('aint').value,{method:'POST'});busy=0;dirty=0;$('amsg').textContent='Applied \u2713'}
 const mark=()=>{dirty=1;$('amsg').textContent='not applied yet'};
-['snd','h24','auto','aint','rot'].forEach(i=>$(i).onchange=mark);$('vol').oninput=()=>{$('vv').textContent=$('vol').value;mark()};$('apply').onclick=send;
+['snd','h24','auto','aint','rot','motion','mmin','msens'].forEach(i=>$(i).onchange=mark);$('vol').oninput=()=>{$('vv').textContent=$('vol').value;mark()};$('apply').onclick=send;
+const CAUSE=['no motion','motion','touch','BOOT button','setting turned off','sensor offline'];
+async function mlog(){try{const a=await (await fetch('/api/motionlog')).json();
+ $('mlog').innerHTML=a.length?a.map(e=>(e.e?'\u2600 woke':'\u263e slept')+' \u00b7 '+(e.w||'up '+Math.floor(e.up/60)+' min')+' \u00b7 '+CAUSE[e.c]).join('<br>'):'<small>No sleep/wake events yet.</small>'}catch(e){}}
+$('mclr').onclick=async()=>{await fetch('/api/motionlog/clear',{method:'POST'});mlog()};
+mlog();setInterval(mlog,5000);
 async function shot(){const r=await fetch('/api/frame',{cache:'no-store'});const b=new Uint8Array(await r.arrayBuffer());
  if(b.length!=480*320*2)return;const cv=$('cv'),x=cv.getContext('2d'),im=x.createImageData(480,320);
  for(let i=0,o=0;i<b.length;i+=2,o+=4){const v=(b[i]<<8)|b[i+1];im.data[o]=((v>>11)&31)*255/31;im.data[o+1]=((v>>5)&63)*255/63;im.data[o+2]=(v&31)*255/31;im.data[o+3]=255}
@@ -476,8 +527,9 @@ load();setInterval(load,5000);
 static String statusJson() {
   String ssid = WiFi.status() == WL_CONNECTED ? WiFi.SSID() : String("");
   ssid.replace("\\", ""); ssid.replace("\"", "");
-  char b[420];
-  snprintf(b, sizeof(b), "{\"h24\":%s,\"ssid\":\"%s\",\"snd\":%s,\"vol\":%d,\"rot\":%d,\"auto\":%s,\"aint\":%d,\"host\":\"%s\",\"ver\":\"" FW_VERSION "\",\"ip\":\"%s\",\"rssi\":%d,\"up\":%lu,\"fps\":%.1f}",
+  char b[640];
+  snprintf(b, sizeof(b), "{\"motion\":%s,\"mmin\":%d,\"msens\":%d,\"mon\":%s,\"mready\":%s,\"mscore\":%.2f,\"asleep\":%s,\"h24\":%s,\"ssid\":\"%s\",\"snd\":%s,\"vol\":%d,\"rot\":%d,\"auto\":%s,\"aint\":%d,\"host\":\"%s\",\"ver\":\"" FW_VERSION "\",\"ip\":\"%s\",\"rssi\":%d,\"up\":%lu,\"fps\":%.1f}",
+           g_motion ? "true" : "false", g_mmin, g_msens, motionDetected() ? "true" : "false", motionReady() ? "true" : "false", motionScore(), g_asleep ? "true" : "false",
            g_h24 ? "true" : "false", ssid.c_str(), g_snd ? "true" : "false", (int)g_vol, g_rot, g_auto ? "true" : "false", g_aint, g_host.c_str(), WiFi.localIP().toString().c_str(), WiFi.RSSI(), millis() / 1000UL, g_fps);
   return String(b);
 }
@@ -500,6 +552,9 @@ static void setupWeb() {
   server.on("/api/set", HTTP_ANY, []() {
     if (server.hasArg("vol")) g_vol = constrain(server.arg("vol").toInt(), 0, 100);
     if (server.hasArg("snd")) g_snd = server.arg("snd").toInt() != 0;
+    if (server.hasArg("motion")) g_motion = server.arg("motion").toInt() != 0;
+    if (server.hasArg("mmin")) g_mmin = constrain(server.arg("mmin").toInt(), 1, 240);
+    if (server.hasArg("msens")) g_msens = constrain(server.arg("msens").toInt(), 1, 10);
     if (server.hasArg("h24")) g_h24 = server.arg("h24").toInt() != 0;
     if (server.hasArg("auto")) g_auto = server.arg("auto").toInt() != 0;
     if (server.hasArg("aint")) g_aint = constrain(server.arg("aint").toInt(), 5, 3600);
@@ -519,6 +574,8 @@ static void setupWeb() {
     server.send(200, "application/octet-stream", "");
     for (size_t off = 0; off < total; off += 4096) server.sendContent((const char *)p + off, min((size_t)4096, total - off));
   });
+  server.on("/api/motionlog", HTTP_GET, []() { server.send(200, "application/json", motionLogJson()); });
+  server.on("/api/motionlog/clear", HTTP_ANY, []() { motionLogClear(); server.send(200, "application/json", "{\"ok\":true}"); });
   server.on("/api/feed", HTTP_ANY, []() {
     feedAt(50 + random(SW - 100), 16, 5);
     server.send(200, "application/json", "{\"ok\":true}");
@@ -556,7 +613,8 @@ void setup() {
   Serial.begin(115200);
   prefs.begin("tank", false);
   g_rot = prefs.getInt("rot", 3); g_snd = prefs.getBool("snd", true); g_vol = prefs.getInt("vol", 60);
-  g_auto = prefs.getBool("afeed", false); g_aint = prefs.getInt("aint", 60); g_h24 = prefs.getBool("h24", false); g_host = prefs.getString("host", HOSTNAME);
+  g_auto = prefs.getBool("afeed", false); g_aint = prefs.getInt("aint", 60); g_h24 = prefs.getBool("h24", false);
+  g_motion = prefs.getBool("motion", false); g_mmin = constrain(prefs.getInt("mmin", 10), 1, 240); g_msens = constrain(prefs.getInt("msens", 5), 1, 10); g_host = prefs.getString("host", HOSTNAME);
   pinMode(0, INPUT_PULLUP);        // BOOT button
   audioStart();          // must run before ft6336u.begin(): both share I2C on GPIO 15/16
   ft6336u.begin();
@@ -584,6 +642,8 @@ void setup() {
 #ifdef WIFI_SSID
   setupWeb();
 #endif
+  motionBegin();
+  lastActivity = millis();
 }
 
 void loop() {
@@ -603,15 +663,26 @@ void loop() {
 #endif
   static bool lastBtn = true;
   bool btn = digitalRead(0);
-  if (!btn && lastBtn) infoUntil = (infoUntil > now) ? 0 : now + 20000;
+  if (!btn && lastBtn) {
+    lastActivity = now;
+    if (g_asleep) wakeScreen(3); else infoUntil = (infoUntil > now) ? 0 : now + 20000;
+  }
   lastBtn = btn;
   FT6336U_TouchPointType tp = ft6336u.scan();
+  if (tp.touch_count != 0) lastActivity = now;
   if (tp.touch_count != 0 && now - lastTouch > 120) {
     lastTouch = now;
-    float x = g_rot == 3 ? SW - tp.tp[0].y : tp.tp[0].y;
-    float y = g_rot == 3 ? tp.tp[0].x : SH - tp.tp[0].x;
-    feedAt(x, max(y, 14.0f), 3);
+    if (g_asleep) {
+      wakeScreen(2);                  // the first touch only wakes the screen
+    } else {
+      float x = g_rot == 3 ? SW - tp.tp[0].y : tp.tp[0].y;
+      float y = g_rot == 3 ? tp.tp[0].x : SH - tp.tp[0].x;
+      feedAt(x, max(y, 14.0f), 3);
+    }
   }
+
+  updateSleep();
+  if (g_asleep) { delay(40); return; }       // screen off: no rendering
 
   updateWorld(dt, t, now);
 
