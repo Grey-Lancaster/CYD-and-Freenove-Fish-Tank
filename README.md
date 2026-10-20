@@ -23,11 +23,15 @@ python3 ~/.platformio/packages/tool-esptoolpy/esptool.py --chip esp32s3 merge_bi
 ```
 Check byte 2 of the merged image is `0x02` (DIO; this board's octal PSRAM needs it).
 
-## Features (v1.0.0)
-Tap-to-feed (sonar ring + ding ding), auto feed, looping bubble sound, clock + date (12/24 h), BOOT info screen, rotation, and - when built with WiFi - a settings web page (`http://fishtank.local`), screenshots, OTA updates (`espota.py`, host `fishtank`), hostname config and **WiFi motion sleep** (ported from the CYD PhotoFrame project: the screen sleeps when nobody is around).
+## Features (v1.1.0)
+Two boards, one codebase: **Freenove FNK0104S** (`pio run -e freenove4`) and **CYD 2.8"** (`pio run -e cyd28`).
+- Tap-to-feed (sonar ring + ding ding), auto feed, looping bubble sound, clock + date (12/24 h), BOOT info screen.
+- **WiFi is set up on the screen** with [TouchWifiProvisioner](https://github.com/Grey-Lancaster/TouchWifiProvisioner) (no credentials in the firmware). BOOT during setup = run offline.
+- Web settings page at `http://fishtank.local` (CYD: `cydfishtank.local`): sound, volume, rotation, **invert colours**, **swap red/blue**, auto feed, 12/24 h, hostname, screenshots, forget WiFi, recalibrate touch (CYD), WiFi **motion sleep** (ported from CYD PhotoFrame).
+- OTA updates: `espota.py -i <ip> -p 3232 -f .pio/build/<env>/firmware.bin -r` (hostname = the board's hostname).
 
-## WiFi build
-Copy `src/secrets.h.example` to `src/secrets.h` (gitignored) and fill in your network, then `pio run`. The flasher page's prebuilt image has no WiFi credentials, so it has no web page, NTP or OTA.
+## Rendering
+The world is a 480x320 virtual space. The Freenove renders a full frame in PSRAM; the CYD has no PSRAM, so it draws and pushes the tank in 30-row strips. `src/hal_*.cpp` hold the per-board display, touch and audio code (Freenove: ES8311 codec; CYD: internal DAC on GPIO26 and bit-banged XPT2046 touch with a five-point calibration).
 
 ## Status
-Runs at about 10 fps on the FNK0104S. First tested on hardware 2026-10-20.
+Freenove runs at about 10 fps. The CYD port compiles and is untested on hardware as of this commit.

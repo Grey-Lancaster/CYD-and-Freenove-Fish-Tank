@@ -28,9 +28,9 @@
       <div class="step-head">
         <h2>About</h2>
       </div>
-      <p class="step-help">An animated fake aquarium for the Freenove FNK0104S: a blue tang, clownfish, angelfish, goldfish and a school of neon tetras swim around a tank with rising bubbles, swaying kelp and drifting light rays. Tap the screen to drop fish food &mdash; the fish swim over and eat it (with a sonar ring and a ding ding). Looping bubble sound through the speaker, plus a clock and date in the corner. BOOT shows the IP and status.</p>
-      <p class="step-help">Version <strong>v1.0.0</strong>. This flasher build runs standalone. To get the web settings page (sound, volume, rotation, auto feed, 12/24-hour time, hostname, screenshots), WiFi time sync, OTA updates and WiFi motion sleep, build from source with your WiFi details in <code>src/secrets.h</code> (see the README).</p>
-      <p class="step-help">Source, design files and build notes: <a href="https://github.com/Grey-Lancaster/CYD-and-Freenove-Fish-Tank" target="_blank" rel="noopener">CYD-and-Freenove-Fish-Tank</a>. A smaller CYD (320&times;240) version is planned.</p>
+      <p class="step-help">An animated fake aquarium for the Freenove FNK0104S and the CYD 2.8&quot;: a blue tang, clownfish, angelfish, goldfish and a school of neon tetras swim around a tank with rising bubbles, swaying kelp and drifting light rays. Tap the screen to drop fish food &mdash; the fish swim over and eat it (with a sonar ring and a ding ding). Looping bubble sound through the speaker, plus a clock and date in the corner.</p>
+      <p class="step-help">Version <strong>v1.1.0</strong>. <strong>WiFi is set up on the screen</strong> the first time it starts (pick your network, type the password). After that, open <code>http://fishtank.local</code> (CYD: <code>http://cydfishtank.local</code>) for settings &mdash; sound, volume, rotation, invert colours, swap red/blue, auto feed, 12/24-hour time, hostname, screenshots and WiFi motion sleep. BOOT shows the IP and status; BOOT during WiFi setup runs the tank offline. The CYD asks you to touch five crosshairs once to calibrate the touch screen.</p>
+      <p class="step-help">Source, design files and build notes: <a href="https://github.com/Grey-Lancaster/CYD-and-Freenove-Fish-Tank" target="_blank" rel="noopener">CYD-and-Freenove-Fish-Tank</a>.</p>
     </section>
 
     <section class="card step">
@@ -38,10 +38,11 @@
         <span class="step-num">1</span>
         <h2>Firmware</h2>
       </div>
-      <p class="step-help">This replaces whatever was on the board before. Target board: Freenove FNK0104S (ESP32-S3, 4.0&quot; 480&times;320 touch display).</p>
+      <p class="step-help">This replaces whatever was on the board before. Pick the one that matches your board.</p>
 
       <select id="chapterSelect" class="chapter-select">
-        <option value="aquarium" data-bin="firmware/aquarium.bin" selected>Aquarium v1.0.0 &mdash; animated fish tank</option>
+        <option value="freenove4" data-bin="firmware/aquarium.bin" selected>Freenove 4.0&quot; FNK0104S (ESP32-S3, 480&times;320) &mdash; v1.1.0</option>
+        <option value="cyd28" data-bin="firmware/aquarium-cyd28.bin">CYD 2.8&quot; (ESP32-2432S028, 320&times;240) &mdash; v1.1.0</option>
       </select>
       <p id="chapterStatus" class="step-help" style="margin-top: 10px; margin-bottom: 0;"></p>
     </section>

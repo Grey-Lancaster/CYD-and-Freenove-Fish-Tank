@@ -1,3 +1,5 @@
+#include "board.h"
+#ifdef BOARD_FREENOVE4
 /*
  * SPDX-FileCopyrightText: 2015-2022 Espressif Systems (Shanghai) CO LTD
  *
@@ -464,3 +466,4 @@ esp_err_t es8311_codec_init(void)
     //ESP_RETURN_ON_ERROR(es8311_microphone_config(es_handle, false), TAG, "set es8311 microphone failed");
     return ESP_OK;
 }
+#endif
