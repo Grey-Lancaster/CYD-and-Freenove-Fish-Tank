@@ -1,5 +1,5 @@
 #include "board.h"
-#ifdef BOARD_FREENOVE4
+#ifdef BOARD_FREENOVE_S3
 // Freenove FNK0104S: ST7796 480x320, FT6336U capacitive touch, ES8311 codec + speaker.
 #include <Wire.h>
 #include "driver/i2s.h"

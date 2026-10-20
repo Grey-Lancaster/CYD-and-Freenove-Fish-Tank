@@ -765,7 +765,7 @@ void setup() {
 
   cv.sx = PANEL_W / (float)VW;
   cv.sy = PANEL_H / (float)VH;
-#ifdef BOARD_FREENOVE4
+#ifdef BOARD_FREENOVE_S3
   frame.setColorDepth(16);
   bg.setColorDepth(16);
   void *fp = frame.createSprite(PANEL_W, PANEL_H);
@@ -837,7 +837,7 @@ void loop() {
   updateWorld(dt, t, now);
   curT = t; curNow = now;
 
-#ifdef BOARD_FREENOVE4
+#ifdef BOARD_FREENOVE_S3
   cv.s = &frame; cv.oy = 0;
   memcpy(frame.getPointer(), bg.getPointer(), PANEL_W * PANEL_H * 2);
   drawScene(t, now);

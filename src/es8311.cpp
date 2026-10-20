@@ -1,5 +1,5 @@
 #include "board.h"
-#ifdef BOARD_FREENOVE4
+#ifdef BOARD_FREENOVE_S3
 /*
  * SPDX-FileCopyrightText: 2015-2022 Espressif Systems (Shanghai) CO LTD
  *

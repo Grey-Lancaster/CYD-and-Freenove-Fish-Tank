@@ -1,4 +1,4 @@
-// Board selection. Build envs: freenove4 (default) and cyd28.
+// Board selection. Build envs: freenove4 (default), freenove28, cyd28 and cyd28usb2.
 #pragma once
 
 // 2-USB CYDs (ST7789) show red and blue swapped with the stock colour order, so that build starts with the swap on.
@@ -8,6 +8,9 @@
 #elif defined(BOARD_CYD28)
   #define DEFAULT_SWAPRB false
   #define BOARD_ID "cyd28"
+#elif defined(BOARD_FREENOVE28)
+  #define DEFAULT_SWAPRB false
+  #define BOARD_ID "freenove28"
 #else
   #define DEFAULT_SWAPRB false
   #define BOARD_ID "freenove4"
@@ -26,8 +29,23 @@
   #define DATE_Y 46
   #define FONT_BIG 2
   #define FONT_SMALL 1
+#elif defined(BOARD_FREENOVE28)
+  // Freenove FNK0104B/AB 2.8": ESP32-S3 N16R8 (PSRAM), ILI9341 320x240, FT6336U touch, ES8311 codec + speaker
+  #define BOARD_FREENOVE_S3 1
+  #define BOARD_NAME "Freenove 2.8"
+  #define PANEL_W 320
+  #define PANEL_H 240
+  #define ROT_LEFT 3
+  #define ROT_RIGHT 1
+  #define DEFAULT_ROT ROT_LEFT
+  #define DEFAULT_HOST "fishtank28"
+  #define TIME_Y 6
+  #define DATE_Y 46
+  #define FONT_BIG 2
+  #define FONT_SMALL 1
 #else
   #define BOARD_FREENOVE4 1
+  #define BOARD_FREENOVE_S3 1
   #define BOARD_NAME "Freenove 4.0"
   #define PANEL_W 480
   #define PANEL_H 320
