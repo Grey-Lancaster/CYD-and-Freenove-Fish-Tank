@@ -38,7 +38,7 @@ int g_msens = 5;               // 1..10
 volatile bool g_asleep = false;
 static uint32_t lastActivity = 0;
 bool g_invert = false;         // flip the panel's colour inversion
-bool g_swaprb = false;         // swap red/blue
+bool g_swaprb = DEFAULT_SWAPRB;  // swap red/blue
 bool g_h24 = false;            // 24-hour clock
 bool g_auto = false;           // automatic feeding
 int g_aint = 60;               // seconds between automatic feeds
@@ -656,7 +656,7 @@ void setup() {
   prefs.begin("tank", false);
   g_rot = prefs.getInt("rot", DEFAULT_ROT); g_snd = prefs.getBool("snd", true); g_vol = prefs.getInt("vol", 60);
   g_auto = prefs.getBool("afeed", false); g_aint = prefs.getInt("aint", 60); g_h24 = prefs.getBool("h24", false);
-  g_invert = prefs.getBool("invert", false); g_swaprb = prefs.getBool("swaprb", false);
+  g_invert = prefs.getBool("invert", false); g_swaprb = prefs.getBool("swaprb", DEFAULT_SWAPRB);
   g_motion = prefs.getBool("motion", false); g_mmin = constrain(prefs.getInt("mmin", 10), 1, 240); g_msens = constrain(prefs.getInt("msens", 5), 1, 10);
   g_host = prefs.getString("host", DEFAULT_HOST);
   if (g_rot != 1 && g_rot != 3) g_rot = DEFAULT_ROT;

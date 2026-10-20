@@ -1,6 +1,13 @@
 // Board selection. Build envs: freenove4 (default) and cyd28.
 #pragma once
 
+// 2-USB CYDs (ST7789) show red and blue swapped with the stock colour order, so that build starts with the swap on.
+#if defined(ST7789_DRIVER)
+  #define DEFAULT_SWAPRB true
+#else
+  #define DEFAULT_SWAPRB false
+#endif
+
 #if defined(BOARD_CYD28)
   #define BOARD_NAME "CYD 2.8"
   #define PANEL_W 320
