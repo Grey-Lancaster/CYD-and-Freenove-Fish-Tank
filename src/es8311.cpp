@@ -442,11 +442,14 @@ es8311_handle_t es8311_create(const i2c_port_t port, const uint16_t dev_addr)
     return (es8311_handle_t) sensor;
 }
 
+es8311_handle_t g_es_handle = NULL;
+
 esp_err_t es8311_codec_init(void)
 {
     /* Initialize es8311 codec */
     es8311_handle_t es_handle = es8311_create(I2C_NUM_0, ES8311_ADDRRES_0);
     ESP_RETURN_ON_FALSE(es_handle, ESP_FAIL, TAG, "es8311 create failed");
+    g_es_handle = es_handle;
     const es8311_clock_config_t es_clk = {
         .mclk_inverted = false,
         .sclk_inverted = false,

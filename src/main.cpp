@@ -6,6 +6,9 @@
 #include <TFT_eSPI.h>
 #include <WiFi.h>
 #include <ArduinoOTA.h>
+#include <WebServer.h>
+#include <ESPmDNS.h>
+#include <Preferences.h>
 #include <time.h>
 #include "FT6336U.h"
 #include <Wire.h>
@@ -14,6 +17,9 @@
 #if __has_include("secrets.h")
 #include "secrets.h"
 #endif
+
+#define FW_VERSION "0.2.0"
+#define HOSTNAME "fishtank"
 
 #define SW 480
 #define SH 320
@@ -28,6 +34,19 @@ TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite frame = TFT_eSprite(&tft);
 TFT_eSprite bg = TFT_eSprite(&tft);
 FT6336U ft6336u(I2C_SDA, I2C_SCL, RST_N_PIN, INT_N_PIN);
+Preferences prefs;
+WebServer server(80);
+extern es8311_handle_t g_es_handle;
+
+// Settings (persisted in NVS, editable from the web page)
+volatile int g_vol = 60;       // 0..100 (60 = the original loop level)
+volatile bool g_snd = true;
+int g_rot = 3;                 // 3 = USB on the left, 1 = USB on the right
+float g_fps = 0;
+bool g_auto = false;           // automatic feeding
+int g_aint = 60;               // seconds between automatic feeds
+String g_host = HOSTNAME;      // mDNS / OTA / DHCP name (editable on the web page)
+uint32_t restartAt = 0;
 
 static inline uint16_t RGB(int r, int g, int b) {
   return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
@@ -55,13 +74,25 @@ static void audioTask(void *) {
   size_t idx = 0;
   for (;;) {
     for (int i = 0; i < 256; i++) {
-      int16_t v = pcm[idx];
+      int32_t s = g_snd ? ((int32_t)pcm[idx] * g_vol) / 60 : 0;
+      if (s > 32767) s = 32767; else if (s < -32768) s = -32768;
+      int16_t v = (int16_t)s;
       out[2 * i] = v; out[2 * i + 1] = v;
       if (++idx >= n) idx = 0;
     }
     size_t written;
     i2s_write(I2S_NUM_0, out, sizeof(out), &written, portMAX_DELAY);
   }
+}
+
+static void applySound() {
+  digitalWrite(AP_ENABLE, g_snd ? LOW : HIGH);          // LOW = amp on (as in the Freenove demos)
+  if (g_es_handle) es8311_voice_mute(g_es_handle, !g_snd);
+}
+
+static void saveSettings() {
+  prefs.putInt("rot", g_rot); prefs.putBool("snd", g_snd); prefs.putInt("vol", g_vol);
+  prefs.putBool("afeed", g_auto); prefs.putInt("aint", g_aint);
 }
 
 static void audioStart() {
@@ -86,6 +117,7 @@ static void audioStart() {
                            .data_out_num = I2S_DOUT, .data_in_num = I2S_DINT};
   i2s_set_pin(I2S_NUM_0, &pins);
   if (es8311_codec_init() != ESP_OK) { Serial.println("ES8311 init failed"); return; }
+  applySound();
   xTaskCreatePinnedToCore(audioTask, "bubbles", 4096, NULL, 2, NULL, 0);
 }
 
@@ -264,13 +296,13 @@ static void initClock() {
 #ifdef WIFI_SSID
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
-  WiFi.setHostname("fish-tank");
+  WiFi.setHostname(g_host.c_str());
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   uint32_t t0 = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - t0 < 8000) delay(100);
   configTzTime("EST5EDT,M3.2.0,M11.1.0", "pool.ntp.org", "time.nist.gov");
   // WiFi stays connected: NTP keeps syncing and OTA stays reachable.
-  ArduinoOTA.setHostname("fish-tank");
+  ArduinoOTA.setHostname(g_host.c_str());
 #ifdef OTA_PASS
   ArduinoOTA.setPassword(OTA_PASS);
 #endif
@@ -280,7 +312,9 @@ static void initClock() {
     tft.fillRect(10, 60, (int)(460.0f * p / total), 20, TFT_GREEN);
   });
   ArduinoOTA.begin();
-  Serial.printf("WiFi %s, IP %s, OTA host fish-tank\n", WiFi.status() == WL_CONNECTED ? "connected" : "NOT connected", WiFi.localIP().toString().c_str());
+  MDNS.begin(g_host.c_str());
+  MDNS.addService("http", "tcp", 80);
+  Serial.printf("WiFi %s, IP %s, host %s\n", WiFi.status() == WL_CONNECTED ? "connected" : "NOT connected", WiFi.localIP().toString().c_str(), g_host.c_str());
 #endif
 }
 
@@ -316,7 +350,22 @@ static void spawnFood(float x, float y) {
     if (!fd.on) { fd = {x, y, true, 0}; return; }
 }
 
+struct Ring { float x, y, age; bool on; };
+Ring rings[6];
+static void feedAt(float x, float y, int n) {
+  for (int i = 0; i < n; i++) spawnFood(x + random(-8, 9), y + random(-4, 5));
+  for (auto &r : rings) if (!r.on) { r = {x, y, 0, true}; break; }      // sonar ring
+}
+
 static void updateWorld(float dt, float t, uint32_t now) {
+  static uint32_t nextFeed = 0;
+  if (g_auto) {
+    if (nextFeed == 0 || now >= nextFeed) {
+      if (nextFeed != 0) feedAt(60 + random(SW - 120), 16, 4);
+      nextFeed = now + (uint32_t)g_aint * 1000UL;
+    }
+  } else nextFeed = 0;
+  for (auto &r : rings) if (r.on) { r.age += dt; if (r.age > 1.5f) r.on = false; }
   for (int i = 0; i < NFISH; i++) {
     Fish &f = fishes[i];
     float tx = f.tx, ty = f.ty;
@@ -354,12 +403,123 @@ static void updateWorld(float dt, float t, uint32_t now) {
 }
 
 
+
+// ------------------------------------------------------------- web page
+static const char PAGE[] PROGMEM = R"HTML(<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Fish Tank</title>
+<style>body{margin:0;font:16px system-ui,sans-serif;background:#0b2a45;color:#e8f4ff}
+main{max-width:460px;margin:0 auto;padding:16px}h1{margin:.2em 0}
+.c{background:#12466f;border-radius:12px;padding:14px;margin:12px 0}
+label{display:flex;justify-content:space-between;align-items:center;margin:10px 0}
+input[type=range]{width:55%}select,button{font:inherit;padding:8px 12px;border-radius:8px;border:0}
+button{background:#2fb36b;color:#fff}small{color:#9cc4e4}</style></head><body><main>
+<h1>&#128032; Fish Tank</h1><small id="st">loading&hellip;</small>
+<div class="c"><label>Sound <input type="checkbox" id="snd"></label>
+<label>Volume <input type="range" id="vol" min="0" max="100"><span id="vv"></span></label>
+<label>Screen rotation <select id="rot"><option value="3">USB on left</option><option value="1">USB on right</option></select></label></div>
+<div class="c"><button id="feed">Feed the fish</button>
+<label style="margin-top:14px">Auto feed <input type="checkbox" id="auto"></label>
+<label>Every (seconds) <input type="number" id="aint" min="5" max="3600" style="width:90px"></label></div>
+<div class="c"><button id="apply">Apply</button> <small id="amsg"></small><br><small>Applies sound, volume, rotation and auto feed.</small></div>
+<div class="c"><label>Hostname <input id="host" maxlength="31" style="width:55%"></label>
+<small>letters, digits and dashes &mdash; reachable as <b id="hl"></b>.local</small><br><br>
+<button id="hsave">Save &amp; reboot</button> <small id="hmsg"></small></div>
+<script>
+const $=i=>document.getElementById(i);let busy=0,dirty=0;
+async function load(){const s=await (await fetch('/api/status')).json();
+ if(!busy&&!dirty){$('auto').checked=s.auto;$('aint').value=s.aint;if(document.activeElement!==$('host'))$('host').value=s.host;$('hl').textContent=s.host;$('snd').checked=s.snd;$('vol').value=s.vol;$('vv').textContent=s.vol;$('rot').value=s.rot}
+ $('st').textContent='v'+s.ver+' · '+s.ip+' · '+s.rssi+' dBm · up '+Math.floor(s.up/60)+' min · '+s.fps.toFixed(1)+' fps'}
+async function send(){busy=1;await fetch('/api/set?snd='+($('snd').checked?1:0)+'&vol='+$('vol').value+'&rot='+$('rot').value+'&auto='+($('auto').checked?1:0)+'&aint='+$('aint').value,{method:'POST'});busy=0;dirty=0;$('amsg').textContent='Applied \u2713'}
+const mark=()=>{dirty=1;$('amsg').textContent='not applied yet'};
+['snd','auto','aint','rot'].forEach(i=>$(i).onchange=mark);$('vol').oninput=()=>{$('vv').textContent=$('vol').value;mark()};$('apply').onclick=send;
+$('feed').onclick=()=>fetch('/api/feed',{method:'POST'});
+$('hsave').onclick=async()=>{const h=$('host').value.trim().toLowerCase();
+ const r=await fetch('/api/host?host='+encodeURIComponent(h),{method:'POST'});
+ if(!r.ok){$('hmsg').textContent=(await r.json()).error;return}
+ $('hmsg').textContent='Rebooting\u2026';clearInterval(window.poll);
+ const cands=[location.origin,'http://'+h+'.local'];
+ setTimeout(()=>{window.poll=setInterval(async()=>{for(const o of cands){try{const s=await (await fetch(o+'/api/status',{cache:'no-store'})).json();
+  if(s.host===h){clearInterval(window.poll);location.href=o+'/';return}}catch(e){}}},2000)},4000)};
+load();setInterval(load,5000);
+</script></main></body></html>)HTML";
+
+static String statusJson() {
+  char b[300];
+  snprintf(b, sizeof(b), "{\"snd\":%s,\"vol\":%d,\"rot\":%d,\"auto\":%s,\"aint\":%d,\"host\":\"%s\",\"ver\":\"" FW_VERSION "\",\"ip\":\"%s\",\"rssi\":%d,\"up\":%lu,\"fps\":%.1f}",
+           g_snd ? "true" : "false", (int)g_vol, g_rot, g_auto ? "true" : "false", g_aint, g_host.c_str(), WiFi.localIP().toString().c_str(), WiFi.RSSI(), millis() / 1000UL, g_fps);
+  return String(b);
+}
+
+static void setupWeb() {
+  server.on("/", HTTP_GET, []() { server.send_P(200, "text/html", PAGE); });
+  server.on("/api/status", HTTP_GET, []() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");      // lets the page find the board under a new hostname
+    server.send(200, "application/json", statusJson());
+  });
+  server.on("/api/host", HTTP_ANY, []() {
+    String h = server.arg("host"); h.trim(); h.toLowerCase();
+    bool ok = h.length() >= 1 && h.length() <= 31 && h[0] != '-' && h[h.length() - 1] != '-';
+    for (size_t i = 0; ok && i < h.length(); i++) ok = isalnum((unsigned char)h[i]) || h[i] == '-';
+    if (!ok) { server.send(400, "application/json", "{\"error\":\"letters, digits and - only (1-31 chars)\"}"); return; }
+    prefs.putString("host", h);
+    server.send(200, "application/json", "{\"ok\":true,\"host\":\"" + h + "\"}");
+    restartAt = millis() + 800;
+  });
+  server.on("/api/set", HTTP_ANY, []() {
+    if (server.hasArg("vol")) g_vol = constrain(server.arg("vol").toInt(), 0, 100);
+    if (server.hasArg("snd")) g_snd = server.arg("snd").toInt() != 0;
+    if (server.hasArg("auto")) g_auto = server.arg("auto").toInt() != 0;
+    if (server.hasArg("aint")) g_aint = constrain(server.arg("aint").toInt(), 5, 3600);
+    if (server.hasArg("rot")) {
+      int r = server.arg("rot").toInt();
+      if (r == 1 || r == 3) { g_rot = r; tft.setRotation(r); }
+    }
+    saveSettings(); applySound();
+    server.send(200, "application/json", statusJson());
+  });
+  server.on("/api/feed", HTTP_ANY, []() {
+    feedAt(50 + random(SW - 100), 16, 5);
+    server.send(200, "application/json", "{\"ok\":true}");
+  });
+  server.begin();
+}
+
+// BOOT button shows connection info for a while
+static uint32_t infoUntil = 0;
+static void drawInfo(uint32_t now) {
+  frame.fillRoundRect(30, 50, 420, 210, 12, RGB(8, 28, 52));
+  frame.drawRoundRect(30, 50, 420, 210, 12, RGB(120, 190, 240));
+  frame.setTextDatum(TL_DATUM);
+  frame.setTextColor(RGB(255, 255, 255));
+  frame.drawString("Fish Tank  v" FW_VERSION, 46, 60, 4);
+  char b[80];
+  frame.setTextColor(RGB(170, 220, 255));
+  snprintf(b, sizeof(b), "http://%s.local", g_host.c_str());
+  frame.drawString(b, 46, 100, 4);
+  snprintf(b, sizeof(b), "http://%s", WiFi.localIP().toString().c_str());
+  frame.drawString(b, 46, 132, 4);
+  frame.setTextColor(RGB(220, 235, 250));
+  snprintf(b, sizeof(b), "WiFi: %s  (%d dBm)", WiFi.status() == WL_CONNECTED ? WiFi.SSID().c_str() : "not connected", WiFi.RSSI());
+  frame.drawString(b, 46, 172, 2);
+  snprintf(b, sizeof(b), "Uptime %lu min   Free heap %u KB   %.1f fps", millis() / 60000UL, (unsigned)(ESP.getFreeHeap() / 1024), g_fps);
+  frame.drawString(b, 46, 194, 2);
+  snprintf(b, sizeof(b), "Sound %s, volume %d   Rotation: USB %s", g_snd ? "on" : "off", (int)g_vol, g_rot == 3 ? "left" : "right");
+  frame.drawString(b, 46, 216, 2);
+  frame.setTextColor(RGB(140, 170, 200));
+  snprintf(b, sizeof(b), "Press BOOT to close (closes in %lu s)", (unsigned long)((infoUntil - now) / 1000));
+  frame.drawString(b, 46, 238, 2);
+}
+
 void setup() {
   Serial.begin(115200);
+  prefs.begin("tank", false);
+  g_rot = prefs.getInt("rot", 3); g_snd = prefs.getBool("snd", true); g_vol = prefs.getInt("vol", 60);
+  g_auto = prefs.getBool("afeed", false); g_aint = prefs.getInt("aint", 60); g_host = prefs.getString("host", HOSTNAME);
+  pinMode(0, INPUT_PULLUP);        // BOOT button
   audioStart();          // must run before ft6336u.begin(): both share I2C on GPIO 15/16
   ft6336u.begin();
   tft.init();
-  tft.setRotation(3);   // 180 deg from rotation 1: USB port on the left
+  tft.setRotation(g_rot);   // 3 = USB port on the left
   tft.fillScreen(TFT_BLACK);
   tft.setSwapBytes(true);
 
@@ -379,6 +539,9 @@ void setup() {
   for (auto &fd : food) fd.on = false;
   tft.setCursor(10, 10, 4); tft.setTextColor(TFT_WHITE); tft.print("Starting tank...");
   initClock();
+#ifdef WIFI_SSID
+  setupWeb();
+#endif
 }
 
 void loop() {
@@ -391,14 +554,21 @@ void loop() {
 
 #ifdef WIFI_SSID
   ArduinoOTA.handle();
+  server.handleClient();
+  if (restartAt && millis() > restartAt) ESP.restart();
   static uint32_t lastWifi = 0;
   if (WiFi.status() != WL_CONNECTED && now - lastWifi > 30000) { lastWifi = now; WiFi.reconnect(); }
 #endif
+  static bool lastBtn = true;
+  bool btn = digitalRead(0);
+  if (!btn && lastBtn) infoUntil = (infoUntil > now) ? 0 : now + 20000;
+  lastBtn = btn;
   FT6336U_TouchPointType tp = ft6336u.scan();
   if (tp.touch_count != 0 && now - lastTouch > 120) {
     lastTouch = now;
-    float x = SW - tp.tp[0].y, y = tp.tp[0].x;   // matches rotation 3
-    for (int i = 0; i < 3; i++) spawnFood(x + random(-8, 9), max(y, 14.0f) + random(-4, 5));
+    float x = g_rot == 3 ? SW - tp.tp[0].y : tp.tp[0].y;
+    float y = g_rot == 3 ? tp.tp[0].x : SH - tp.tp[0].x;
+    feedAt(x, max(y, 14.0f), 3);
   }
 
   updateWorld(dt, t, now);
@@ -426,18 +596,32 @@ void loop() {
     }
   }
   for (auto &fd : food) if (fd.on) frame.fillCircle((int)fd.x, (int)fd.y, 2, RGB(235, 200, 120));
+  for (auto &r : rings) {
+    if (!r.on) continue;
+    for (int k = 0; k < 2; k++) {
+      float a = r.age - k * 0.25f;
+      if (a <= 0 || a > 1.4f) continue;
+      float b = 1.0f - a / 1.4f;
+      uint16_t c = RGB((int)(60 + 170 * b), (int)(120 + 120 * b), (int)(170 + 85 * b));
+      int rad = (int)(a * 55);
+      frame.drawCircle((int)r.x, (int)r.y, rad, c);
+      frame.drawCircle((int)r.x, (int)r.y, rad + 1, c);
+    }
+  }
   for (auto &b : bubbles) {
     int bx = (int)(b.x + 5 * sinf(t * b.v * 0.08f + b.ph)), by = (int)b.y, r = (int)b.r;
     frame.drawCircle(bx, by, r, RGB(205, 232, 255));
     frame.drawPixel(bx - r / 3, by - r / 3, TFT_WHITE);
   }
   drawClock();
+  if (infoUntil > now) drawInfo(now);
 
   frame.pushSprite(0, 0);
 
   frames++;
   if (now - fpsT >= 5000) {
-    Serial.printf("fps: %.1f\n", frames * 1000.0f / (now - fpsT));
+    g_fps = frames * 1000.0f / (now - fpsT);
+    Serial.printf("fps: %.1f\n", g_fps);
     frames = 0; fpsT = now;
   }
 }
