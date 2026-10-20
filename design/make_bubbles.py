@@ -8,13 +8,13 @@ buf = [0.0] * N
 raw = [random.uniform(-1, 1) for _ in range(N + 4000)]
 lp = 0.0; sm = []
 for v in raw:
-    lp += (v - lp) * 0.03; sm.append(lp)
+    lp += (v - lp) * 0.012; sm.append(lp)
 for i in range(N):
     v = sm[i]
     if i < 4000:
         w = i / 4000.0
         v = sm[i] * w + sm[N + i] * (1 - w)
-    buf[i] = v * 0.9
+    buf[i] = v * 0.25
 def bloop(t0, f0, dur, amp):
     n = int(dur * SR); ph = 0.0
     for k in range(n):
@@ -31,7 +31,7 @@ for _ in range(34):
         for _ in range(random.randint(1, 3)):
             bloop(t0 + int(random.uniform(0.03, 0.2) * SR), f0 * random.uniform(0.8, 1.5), dur * 0.7, amp * 0.5)
 peak = max(abs(v) for v in buf)
-pcm = [int(v / peak * 14000) for v in buf]
+pcm = [int(v / peak * 8400) for v in buf]
 with wave.open("design/bubbles.wav", "wb") as w:
     w.setnchannels(1); w.setsampwidth(2); w.setframerate(SR)
     w.writeframes(struct.pack("<%dh" % N, *pcm))
