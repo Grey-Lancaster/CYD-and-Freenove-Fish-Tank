@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 f2_*.png
 build_task.log
+src/secrets.h

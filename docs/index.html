@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Fish Tank Flasher</title>
+<link rel="icon" href="favicon.ico" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <img class="hero-icon" src="logo.png" alt="Fish Tank" />
+    <h1 id="pageTitle">Fish Tank Flasher</h1>
+    <p id="pageSubtitle" class="subtitle">Flash the animated aquarium straight from this page. No software to install.</p>
+  </header>
+
+  <section id="unsupported" class="banner banner-warn hidden">
+    <strong>Your browser can't do this.</strong>
+    Web Serial only works in <strong>Chrome</strong> or <strong>Edge</strong> on a computer (not phone/tablet, not Safari or Firefox).
+    Open this page in Chrome or Edge and try again.
+  </section>
+
+  <main id="app" class="steps">
+
+        <section class="card step" id="about">
+      <div class="step-head">
+        <h2>About</h2>
+      </div>
+      <p class="step-help">An animated fake aquarium for the Freenove FNK0104S: a blue tang, clownfish, angelfish, goldfish and a school of neon tetras swim around a tank with rising bubbles, swaying kelp and drifting light rays. Tap the screen to drop fish food &mdash; the fish swim over and eat it. A clock sits in the top-right corner.</p>
+      <p class="step-help">Version <strong>v0.1.0</strong> &mdash; first build, not yet tested on hardware. The clock shows the firmware build time unless WiFi credentials are compiled in. A smaller CYD (320&times;240) version is planned.</p>
+      <p class="step-help">Source, design files and build notes: <a href="https://github.com/Grey-Lancaster/CYD-and-Freenove-Fish-Tank" target="_blank" rel="noopener">CYD-and-Freenove-Fish-Tank</a>.</p>
+    </section>
+
+    <section class="card step">
+      <div class="step-head">
+        <span class="step-num">1</span>
+        <h2>Firmware</h2>
+      </div>
+      <p class="step-help">This replaces whatever was on the board before. Target board: Freenove FNK0104S (ESP32-S3, 4.0&quot; 480&times;320 touch display).</p>
+
+      <select id="chapterSelect" class="chapter-select">
+        <option value="aquarium" data-bin="firmware/aquarium.bin" selected>Aquarium v0.1.0 &mdash; animated fish tank</option>
+      </select>
+      <p id="chapterStatus" class="step-help" style="margin-top: 10px; margin-bottom: 0;"></p>
+    </section>
+
+    <section class="card step">
+      <div class="step-head">
+        <span class="step-num">2</span>
+        <h2>Connect your board</h2>
+      </div>
+      <p class="step-help">Plug the device into a USB port, then click connect and pick it from the list. This requires the board to be in bootloader mode (it's what actually flashes it) &mdash; to just read logs from a board that's already running normally, use <strong>View Device Logs</strong> below instead, no bootloader mode needed.</p>
+      <button id="connectBtn" class="btn btn-primary" disabled>Connect Device</button>
+      <span id="connectStatus" class="status"></span>
+
+      <details class="advanced">
+        <summary>Advanced options</summary>
+        <div class="advanced-body">
+          <label>
+            Baud rate
+            <select id="baudRate">
+              <option value="115200">115200 (safest)</option>
+              <option value="230400">230400</option>
+              <option value="460800" selected>460800 (recommended)</option>
+              <option value="921600">921600 (fastest)</option>
+            </select>
+          </label>
+          <label class="checkbox-row">
+            <input type="checkbox" id="eraseAll" />
+            Erase entire flash first
+          </label>
+        </div>
+      </details>
+    </section>
+
+    <section class="card step">
+      <div class="step-head">
+        <span class="step-num">3</span>
+        <h2>Flash it</h2>
+      </div>
+      <p class="step-help">This takes a minute or two. Don't unplug the device or close this tab while it runs.</p>
+      <button id="flashBtn" class="btn btn-primary" disabled>Flash Firmware</button>
+
+      <div id="progressWrap" class="progress-wrap hidden">
+        <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+        <div id="progressLabel" class="progress-label">0%</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="step-head">
+        <h2>Log</h2>
+        <button id="viewLogsBtn" class="btn btn-ghost">View Device Logs</button>
+        <button id="stopLogsBtn" class="btn btn-ghost hidden">Stop Logs</button>
+        <button id="clearLogBtn" class="btn btn-ghost">Clear</button>
+      </div>
+      <p class="step-help" style="margin: -4px 0 10px;">Works on a board that's already running normally &mdash; no bootloader mode or flashing required, just a plain serial connection.</p>
+      <pre id="log" class="log"></pre>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <span id="footerNote">Built with <a href="https://github.com/espressif/esptool-js" target="_blank" rel="noopener">esptool-js</a>. Source: <a href="https://github.com/Grey-Lancaster/CYD-and-Freenove-Fish-Tank" target="_blank" rel="noopener">CYD-and-Freenove-Fish-Tank</a>.</span>
+  </footer>
+
+</div>
+
+<dialog id="noPortDialog" class="modal">
+  <h2>Aw crap, no port selected</h2>
+  <p>
+    If you didn't select a port because you didn't see your device listed, try
+    the following steps:
+  </p>
+  <ol>
+    <li>
+      Make sure the device is connected to this computer (the one running the
+      browser that shows this page).
+    </li>
+    <li>Most devices have a tiny light when powered on &mdash; make sure it's on.</li>
+    <li>
+      Make sure the USB cable you're using can be used for data, not a
+      power-only cable.
+    </li>
+    <li id="linuxDriverNote" class="hidden">
+      On Linux, make sure your user is part of the <code>dialout</code> group
+      so it has permission to access the device:
+      <code class="block">sudo usermod -a -G dialout YourUserName</code>
+      You may need to log out and back in (or reboot) for that to take effect.
+    </li>
+    <li>
+      Make sure you have the right drivers installed. This board uses native
+      USB (CDC), so it usually needs no separate driver &mdash; but the port
+      number will change between bootloader mode and normal running mode,
+      which is expected.
+    </li>
+  </ol>
+  <div class="modal-actions">
+    <button id="noPortCancelBtn" class="btn btn-ghost">Cancel</button>
+    <button id="noPortRetryBtn" class="btn btn-primary">Try Again</button>
+  </div>
+</dialog>
+
+<dialog id="connectErrorDialog" class="modal">
+  <h2>Aw crap, couldn't connect</h2>
+  <p>
+    A port was selected, but the device didn't respond. A few things to try:
+  </p>
+  <ol>
+    <li>
+      Some boards need the <strong>BOOT</strong> (or <strong>FLASH</strong>)
+      button held down while connecting. Hold it, click <strong>Try
+      Again</strong>, and release once the log shows "Connected."
+    </li>
+    <li>
+      Make sure nothing else has the port open &mdash; close the Arduino
+      Serial Monitor, PlatformIO, or any other browser tab using it.
+    </li>
+    <li>Try a slower baud rate under <strong>Advanced options</strong>.</li>
+    <li>Unplug the USB cable, plug it back in, and try again.</li>
+  </ol>
+  <p class="modal-error-detail">Error: <code id="connectErrorDetail"></code></p>
+  <div class="modal-actions">
+    <button id="connectErrorCancelBtn" class="btn btn-ghost">Cancel</button>
+    <button id="connectErrorRetryBtn" class="btn btn-primary">Try Again</button>
+  </div>
+</dialog>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
