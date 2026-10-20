@@ -399,7 +399,7 @@ button,.b{background:#2fb36b;color:#fff;text-decoration:none;border-radius:8px;p
 <div class="c"><label>Sound <input type="checkbox" id="snd"></label>
 <label>Volume <input type="range" id="vol" min="0" max="100"><span id="vv"></span></label>
 <label>24-hour time <input type="checkbox" id="h24"></label>
-<label>Screen rotation <select id="rot"><option value="@A@">Normal</option><option value="@B@">Upside down</option></select></label>
+<label>Screen rotation <select id="rot"><option value="@L@">USB on left</option><option value="@R@">USB on right</option></select></label>
 <label>Invert colours <input type="checkbox" id="inv"></label>
 <label>Swap red and blue <input type="checkbox" id="swaprb"></label>
 <small>Use these if the colours look wrong (like a photo negative, or red and blue swapped).</small></div>
@@ -487,7 +487,7 @@ static void renderStrip(int i) {
 static void setupWeb() {
   server.on("/", HTTP_GET, []() {
     String p = FPSTR(PAGE);
-    p.replace("@A@", String(DEFAULT_ROT)); p.replace("@B@", String(4 - DEFAULT_ROT));
+    p.replace("@L@", String(ROT_LEFT)); p.replace("@R@", String(ROT_RIGHT));
     server.send(200, "text/html", p);
   });
   server.on("/api/status", HTTP_GET, []() {

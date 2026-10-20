@@ -24,7 +24,7 @@ python3 ~/.platformio/packages/tool-esptoolpy/esptool.py --chip esp32s3 merge_bi
 Check byte 2 of the merged image is `0x02` (DIO; this board's octal PSRAM needs it).
 
 ## Features (v1.1.0)
-Two boards, one codebase: **Freenove FNK0104S** (`pio run -e freenove4`) and **CYD 2.8"** (`pio run -e cyd28`).
+Three builds, one codebase: **Freenove FNK0104S** (`pio run -e freenove4`), **CYD 2.8"** with ILI9341 (`pio run -e cyd28`) and the **2-USB CYD 2.8"** with ST7789 (`pio run -e cyd28usb2`). Wrong colours on a CYD usually means the other CYD build.
 - Tap-to-feed (sonar ring + ding ding), auto feed, looping bubble sound, clock + date (12/24 h), BOOT info screen.
 - **WiFi is set up on the screen** with [TouchWifiProvisioner](https://github.com/Grey-Lancaster/TouchWifiProvisioner) (no credentials in the firmware). BOOT during setup = run offline.
 - Web settings page at `http://fishtank.local` (CYD: `cydfishtank.local`): sound, volume, rotation, **invert colours**, **swap red/blue**, auto feed, 12/24 h, hostname, screenshots, forget WiFi, recalibrate touch (CYD), WiFi **motion sleep** (ported from CYD PhotoFrame).
@@ -34,4 +34,4 @@ Two boards, one codebase: **Freenove FNK0104S** (`pio run -e freenove4`) and **C
 The world is a 480x320 virtual space. The Freenove renders a full frame in PSRAM; the CYD has no PSRAM, so it draws and pushes the tank in 30-row strips. `src/hal_*.cpp` hold the per-board display, touch and audio code (Freenove: ES8311 codec; CYD: internal DAC on GPIO26 and bit-banged XPT2046 touch with a five-point calibration).
 
 ## Status
-Freenove runs at about 10 fps. The CYD port compiles and is untested on hardware as of this commit.
+Freenove and the 2-USB CYD (ST7789) run at about 10-11 fps. The 1-USB ILI9341 CYD build compiles but has not been tried on hardware.

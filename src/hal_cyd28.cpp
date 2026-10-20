@@ -16,14 +16,23 @@
 void halBacklight(bool on) { digitalWrite(TFT_BL, on ? HIGH : LOW); }
 
 // ---------------------------------------------------------------- display
-// The rotation's MADCTL as TFT_eSPI sets it for the ILI9341, with red/blue optionally flipped.
+// The rotation's MADCTL as TFT_eSPI sets it for the panel (ILI9341 or the 2-USB boards' ST7789), with red/blue
+// optionally flipped. Same tables as CYD PhotoFrame.
 void halApplyColors() {
+#if defined(ST7789_DRIVER)
+  static const uint8_t baseFor[4] = {0, TFT_MAD_MX | TFT_MAD_MV, TFT_MAD_MX | TFT_MAD_MY, TFT_MAD_MV | TFT_MAD_MY};
+#else
   static const uint8_t baseFor[4] = {TFT_MAD_MX, TFT_MAD_MV, TFT_MAD_MY, TFT_MAD_MX | TFT_MAD_MY | TFT_MAD_MV};
+#endif
   const uint8_t base = baseFor[tft.getRotation() & 3];
   const uint8_t order = g_swaprb ? (TFT_MAD_COLOR_ORDER ^ TFT_MAD_BGR) : TFT_MAD_COLOR_ORDER;
   tft.writecommand(TFT_MADCTL);
   tft.writedata(base | order);
+#ifdef TFT_INVERSION_ON
+  tft.invertDisplay(!g_invert);
+#else
   tft.invertDisplay(g_invert);
+#endif
 }
 
 void halApplyRotation() {

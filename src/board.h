@@ -6,7 +6,9 @@
   #define PANEL_W 320
   #define PANEL_H 240
   #define STRIP_H 30            // no PSRAM: the tank is drawn and pushed in horizontal strips
-  #define DEFAULT_ROT 1
+  #define ROT_LEFT 3            // USB port on the left (assumes the USB ports are on the bottom edge in portrait)
+  #define ROT_RIGHT 1
+  #define DEFAULT_ROT ROT_LEFT
   #define DEFAULT_HOST "cydfishtank"
   #define TIME_Y 6
   #define DATE_Y 46
@@ -17,7 +19,9 @@
   #define BOARD_NAME "Freenove 4.0"
   #define PANEL_W 480
   #define PANEL_H 320
-  #define DEFAULT_ROT 3         // USB port on the left
+  #define ROT_LEFT 3            // USB port on the left
+  #define ROT_RIGHT 1
+  #define DEFAULT_ROT ROT_LEFT
   #define DEFAULT_HOST "fishtank"
   #define TIME_Y 8
   #define DATE_Y 37
