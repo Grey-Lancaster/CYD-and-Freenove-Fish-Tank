@@ -18,7 +18,7 @@
 #include "motion.h"
 #include "wifi_setup.h"
 
-#define FW_VERSION "1.3.0"
+#define FW_VERSION "1.4.0"
 
 TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite frame = TFT_eSprite(&tft);    // Freenove: the whole frame
@@ -41,6 +41,8 @@ static uint32_t lastActivity = 0;
 bool g_invert = false;         // flip the panel's colour inversion
 bool g_swaprb = DEFAULT_SWAPRB;  // swap red/blue
 bool g_h24 = false;            // 24-hour clock
+String g_tz = "EST5EDT,M3.2.0,M11.1.0";   // POSIX TZ string
+int g_datefmt = 0;             // 0 Tue 10/20/26, 1 Tue 20/10/26, 2 Tue 2026-10-20, 3 Tue, Oct 20, 4 hidden
 bool g_auto = false;           // automatic feeding
 int g_aint = 60;               // seconds between automatic feeds
 String g_host = DEFAULT_HOST;  // mDNS / OTA / DHCP name (editable on the web page)
@@ -56,7 +58,7 @@ static inline uint16_t bswap16(uint16_t v) { return (v >> 8) | (v << 8); }
 
 static void saveSettings() {
   prefs.putInt("rot", g_rot); prefs.putBool("snd", g_snd); prefs.putInt("vol", g_vol);
-  prefs.putBool("afeed", g_auto); prefs.putInt("aint", g_aint); prefs.putBool("h24", g_h24);
+  prefs.putBool("afeed", g_auto); prefs.putInt("aint", g_aint); prefs.putBool("h24", g_h24); prefs.putString("tz", g_tz); prefs.putInt("dfmt", g_datefmt);
   prefs.putBool("invert", g_invert); prefs.putBool("swaprb", g_swaprb);
   prefs.putBool("motion", g_motion); prefs.putInt("mmin", g_mmin); prefs.putInt("msens", g_msens);
 }
@@ -280,24 +282,36 @@ static void connectWifi() {
   if (up) startServices();
 }
 
-static void drawClock() {
+// Time and date text in the chosen formats (date is empty until the clock is set, or when hidden).
+static void clockStrings(char *buf, size_t bn, char *date, size_t dn) {
   int h, mi;
-  char date[24] = "";
+  date[0] = 0;
   struct tm tmv;
   if (getLocalTime(&tmv, 0)) {
     h = tmv.tm_hour; mi = tmv.tm_min;
-    static const char *dn[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-    snprintf(date, sizeof(date), "%s %02d/%02d/%02d", dn[tmv.tm_wday], tmv.tm_mon + 1, tmv.tm_mday, tmv.tm_year % 100);
+    static const char *dnm[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    static const char *mnm[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+    switch (g_datefmt) {
+      case 0: snprintf(date, dn, "%s %02d/%02d/%02d", dnm[tmv.tm_wday], tmv.tm_mon + 1, tmv.tm_mday, tmv.tm_year % 100); break;
+      case 1: snprintf(date, dn, "%s %02d/%02d/%02d", dnm[tmv.tm_wday], tmv.tm_mday, tmv.tm_mon + 1, tmv.tm_year % 100); break;
+      case 2: snprintf(date, dn, "%s %04d-%02d-%02d", dnm[tmv.tm_wday], tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday); break;
+      case 3: snprintf(date, dn, "%s, %s %d", dnm[tmv.tm_wday], mnm[tmv.tm_mon], tmv.tm_mday); break;
+      default: break;
+    }
   } else {
     uint32_t s = (baseSecs + millis() / 1000) % 86400;
     h = s / 3600; mi = (s / 60) % 60;
   }
-  char buf[16];
-  if (g_h24) snprintf(buf, sizeof(buf), "%02d:%02d", h, mi);
+  if (g_h24) snprintf(buf, bn, "%02d:%02d", h, mi);
   else {
     int h12 = h % 12; if (h12 == 0) h12 = 12;
-    snprintf(buf, sizeof(buf), "%d:%02d %s", h12, mi, h >= 12 ? "PM" : "AM");
+    snprintf(buf, bn, "%d:%02d %s", h12, mi, h >= 12 ? "PM" : "AM");
   }
+}
+
+static void drawClock() {
+  char buf[16], date[24];
+  clockStrings(buf, sizeof(buf), date, sizeof(date));
   cv.setTextDatum(TR_DATUM);
   cv.setTextColor(RGB(10, 40, 80));
   cv.drawString(buf, VW - 9, TIME_Y + 1, 4);
@@ -435,7 +449,6 @@ button,.b{background:#2fb36b;color:#fff;text-decoration:none;border-radius:8px;p
 <h1>&#128032; Fish Tank</h1><small id="st">loading&hellip;</small>
 <div class="c"><label>Sound <input type="checkbox" id="snd"></label>
 <label>Volume <input type="range" id="vol" min="0" max="100"><span id="vv"></span></label>
-<label>24-hour time <input type="checkbox" id="h24"></label>
 <label>Screen rotation <select id="rot"><option value="@L@">USB on left</option><option value="@R@">USB on right</option></select></label>
 <label>Invert colours <input type="checkbox" id="inv"></label>
 <label>Swap red and blue <input type="checkbox" id="swaprb"></label>
@@ -443,6 +456,18 @@ button,.b{background:#2fb36b;color:#fff;text-decoration:none;border-radius:8px;p
 <div class="c"><button id="feed">Feed the fish</button> <button id="chest">Open the treasure chest</button>
 <label style="margin-top:14px">Auto feed <input type="checkbox" id="auto"></label>
 <label>Every (seconds) <input type="number" id="aint" min="5" max="3600" style="width:90px"></label></div>
+<div class="c"><b>Date &amp; time</b> <small id="now"></small>
+<label>Time zone <select id="tz">
+<option value="EST5EDT,M3.2.0,M11.1.0">US Eastern</option><option value="CST6CDT,M3.2.0,M11.1.0">US Central</option>
+<option value="MST7MDT,M3.2.0,M11.1.0">US Mountain</option><option value="MST7">US Arizona</option>
+<option value="PST8PDT,M3.2.0,M11.1.0">US Pacific</option><option value="AKST9AKDT,M3.2.0,M11.1.0">US Alaska</option>
+<option value="HST10">US Hawaii</option><option value="GMT0BST,M3.5.0/1,M10.5.0">UK / Ireland</option>
+<option value="CET-1CEST,M3.5.0,M10.5.0">Central Europe</option><option value="EET-2EEST,M3.5.0/3,M10.5.0/4">Eastern Europe</option>
+<option value="IST-5:30">India</option><option value="CST-8">China</option><option value="JST-9">Japan</option>
+<option value="AEST-10AEDT,M10.1.0,M4.1.0/3">Australia East</option><option value="UTC0">UTC</option></select></label>
+<label>Date format <select id="dfmt"><option value="0">Tue 10/20/26 (month/day)</option><option value="1">Tue 20/10/26 (day/month)</option>
+<option value="2">Tue 2026-10-20</option><option value="3">Tue, Oct 20</option><option value="4">Hide the date</option></select></label>
+<label>24-hour time <input type="checkbox" id="h24"></label></div>
 <div class="c"><button id="shot">Screenshot</button> <label style="display:inline"><input type="checkbox" id="live"> live view</label>
 <small id="shm"> (the tank pauses for a second while it copies)</small>
 <canvas id="cv" width="480" height="320" style="display:none;width:100%;margin-top:10px;border-radius:8px"></canvas>
@@ -454,7 +479,7 @@ button,.b{background:#2fb36b;color:#fff;text-decoration:none;border-radius:8px;p
 <small id="mlive"></small>
 <div id="mlog" style="margin-top:8px;font-size:14px"></div>
 <button id="mclr">Clear log</button></div>
-<div class="c"><button id="apply">Apply</button> <small id="amsg"></small><br><small>Applies sound, volume, rotation and auto feed.</small></div>
+<div class="c"><button id="apply">Apply</button> <small id="amsg"></small><br><small>Applies sound, volume, rotation, colours, time zone, date format and the other settings above.</small></div>
 <div class="c"><b>Firmware update</b><br><small>Upload the <b>update</b> file for this board (not the factory file): it keeps your WiFi and settings.</small><br>
 <input type="file" id="fw" accept=".bin"><br><button id="fwb">Upload &amp; restart</button> <small id="fwmsg"></small></div>
 <div class="c"><b>System</b><br>
@@ -467,11 +492,12 @@ const $=i=>document.getElementById(i);let busy=0,dirty=0;
 async function load(){const s=await (await fetch('/api/status')).json();
  $('mlive').textContent=s.motion?(s.mready?'motion score '+s.mscore+(s.mon?' \u25cf moving':' (quiet)')+(s.asleep?' \u00b7 screen asleep':''):'sensor warming up\u2026'):'';
 window.envId=s.env;$('recal').style.display=s.board=='cyd'?'inline-block':'none';
-if(!busy&&!dirty){$('inv').checked=s.inv;$('swaprb').checked=s.swaprb;$('motion').checked=s.motion;$('mmin').value=s.mmin;$('msens').value=s.msens;$('h24').checked=s.h24;$('auto').checked=s.auto;$('aint').value=s.aint;if(document.activeElement!==$('host'))$('host').value=s.host;$('hl').textContent=s.host;$('snd').checked=s.snd;$('vol').value=s.vol;$('vv').textContent=s.vol;$('rot').value=s.rot}
+$('now').textContent=s.now;
+if(!busy&&!dirty){$('tz').value=s.tz;$('dfmt').value=s.dfmt;$('inv').checked=s.inv;$('swaprb').checked=s.swaprb;$('motion').checked=s.motion;$('mmin').value=s.mmin;$('msens').value=s.msens;$('h24').checked=s.h24;$('auto').checked=s.auto;$('aint').value=s.aint;if(document.activeElement!==$('host'))$('host').value=s.host;$('hl').textContent=s.host;$('snd').checked=s.snd;$('vol').value=s.vol;$('vv').textContent=s.vol;$('rot').value=s.rot}
  $('st').textContent='v'+s.ver+' · WiFi '+(s.ssid||'?')+' · '+s.ip+' · '+s.rssi+' dBm · up '+Math.floor(s.up/60)+' min · '+s.fps.toFixed(1)+' fps'}
-async function send(){busy=1;await fetch('/api/set?snd='+($('snd').checked?1:0)+'&vol='+$('vol').value+'&rot='+$('rot').value+'&motion='+($('motion').checked?1:0)+'&mmin='+$('mmin').value+'&msens='+$('msens').value+'&inv='+($('inv').checked?1:0)+'&swaprb='+($('swaprb').checked?1:0)+'&h24='+($('h24').checked?1:0)+'&auto='+($('auto').checked?1:0)+'&aint='+$('aint').value,{method:'POST'});busy=0;dirty=0;$('amsg').textContent='Applied \u2713'}
+async function send(){busy=1;await fetch('/api/set?snd='+($('snd').checked?1:0)+'&vol='+$('vol').value+'&rot='+$('rot').value+'&motion='+($('motion').checked?1:0)+'&mmin='+$('mmin').value+'&msens='+$('msens').value+'&inv='+($('inv').checked?1:0)+'&swaprb='+($('swaprb').checked?1:0)+'&tz='+encodeURIComponent($('tz').value)+'&dfmt='+$('dfmt').value+'&h24='+($('h24').checked?1:0)+'&auto='+($('auto').checked?1:0)+'&aint='+$('aint').value,{method:'POST'});busy=0;dirty=0;$('amsg').textContent='Applied \u2713'}
 const mark=()=>{dirty=1;$('amsg').textContent='not applied yet'};
-['snd','h24','auto','aint','rot','motion','mmin','msens','inv','swaprb'].forEach(i=>$(i).onchange=mark);$('vol').oninput=()=>{$('vv').textContent=$('vol').value;mark()};$('apply').onclick=send;
+['snd','h24','auto','aint','rot','motion','mmin','msens','inv','swaprb','tz','dfmt'].forEach(i=>$(i).onchange=mark);$('vol').oninput=()=>{$('vv').textContent=$('vol').value;mark()};$('apply').onclick=send;
 const CAUSE=['no motion','motion','touch','BOOT button','setting turned off','sensor offline'];
 async function mlog(){try{const a=await (await fetch('/api/motionlog')).json();
  $('mlog').innerHTML=a.length?a.map(e=>(e.e?'\u2600 woke':'\u263e slept')+' \u00b7 '+(e.w||'up '+Math.floor(e.up/60)+' min')+' \u00b7 '+CAUSE[e.c]).join('<br>'):'<small>No sleep/wake events yet.</small>'}catch(e){}}
@@ -508,8 +534,11 @@ load();setInterval(load,5000);
 static String statusJson() {
   String ssid = WiFi.status() == WL_CONNECTED ? WiFi.SSID() : String("");
   ssid.replace("\\", ""); ssid.replace("\"", "");
-  char b[700];
-  snprintf(b, sizeof(b), "{\"env\":\"" BOARD_ID "\",\"board\":\"%s\",\"inv\":%s,\"swaprb\":%s,\"motion\":%s,\"mmin\":%d,\"msens\":%d,\"mon\":%s,\"mready\":%s,\"mscore\":%.2f,\"asleep\":%s,\"h24\":%s,\"ssid\":\"%s\",\"snd\":%s,\"vol\":%d,\"rot\":%d,\"auto\":%s,\"aint\":%d,\"host\":\"%s\",\"ver\":\"" FW_VERSION "\",\"ip\":\"%s\",\"rssi\":%d,\"up\":%lu,\"fps\":%.1f}",
+  char b[1000];
+  char tbuf[16], dbuf[24];
+  clockStrings(tbuf, sizeof(tbuf), dbuf, sizeof(dbuf));
+  snprintf(b, sizeof(b), "{\"tz\":\"%s\",\"dfmt\":%d,\"now\":\"%s  %s\",\"env\":\"" BOARD_ID "\",\"board\":\"%s\",\"inv\":%s,\"swaprb\":%s,\"motion\":%s,\"mmin\":%d,\"msens\":%d,\"mon\":%s,\"mready\":%s,\"mscore\":%.2f,\"asleep\":%s,\"h24\":%s,\"ssid\":\"%s\",\"snd\":%s,\"vol\":%d,\"rot\":%d,\"auto\":%s,\"aint\":%d,\"host\":\"%s\",\"ver\":\"" FW_VERSION "\",\"ip\":\"%s\",\"rssi\":%d,\"up\":%lu,\"fps\":%.1f}",
+           g_tz.c_str(), g_datefmt, tbuf, dbuf,
 #ifdef BOARD_CYD28
            "cyd",
 #else
@@ -556,6 +585,13 @@ static void setupWeb() {
     if (server.hasArg("mmin")) g_mmin = constrain(server.arg("mmin").toInt(), 1, 240);
     if (server.hasArg("msens")) g_msens = constrain(server.arg("msens").toInt(), 1, 10);
     if (server.hasArg("h24")) g_h24 = server.arg("h24").toInt() != 0;
+    if (server.hasArg("dfmt")) g_datefmt = constrain(server.arg("dfmt").toInt(), 0, 4);
+    if (server.hasArg("tz")) {
+      String z = server.arg("tz"); z.trim();
+      bool ok = z.length() >= 3 && z.length() <= 47;
+      for (size_t i = 0; ok && i < z.length(); i++) { char c = z[i]; ok = isalnum((unsigned char)c) || strchr(",.:/+-", c); }
+      if (ok && z != g_tz) { g_tz = z; setenv("TZ", g_tz.c_str(), 1); tzset(); }
+    }
     if (server.hasArg("auto")) g_auto = server.arg("auto").toInt() != 0;
     if (server.hasArg("aint")) g_aint = constrain(server.arg("aint").toInt(), 5, 3600);
     bool colorsChanged = false;
@@ -624,7 +660,7 @@ static void setupWeb() {
 static void startServices() {
   g_online = true;
   WiFi.setAutoReconnect(true);
-  configTzTime("EST5EDT,M3.2.0,M11.1.0", "pool.ntp.org", "time.nist.gov");
+  configTzTime(g_tz.c_str(), "pool.ntp.org", "time.nist.gov");
   ArduinoOTA.setHostname(g_host.c_str());
 #ifdef OTA_PASS
   ArduinoOTA.setPassword(OTA_PASS);
@@ -753,7 +789,7 @@ void setup() {
   Serial.begin(115200);
   prefs.begin("tank", false);
   g_rot = prefs.getInt("rot", DEFAULT_ROT); g_snd = prefs.getBool("snd", true); g_vol = prefs.getInt("vol", 60);
-  g_auto = prefs.getBool("afeed", false); g_aint = prefs.getInt("aint", 60); g_h24 = prefs.getBool("h24", false);
+  g_auto = prefs.getBool("afeed", false); g_aint = prefs.getInt("aint", 60); g_h24 = prefs.getBool("h24", false); g_tz = prefs.getString("tz", g_tz); g_datefmt = constrain(prefs.getInt("dfmt", 0), 0, 4);
   g_invert = prefs.getBool("invert", false); g_swaprb = prefs.getBool("swaprb", DEFAULT_SWAPRB);
   g_motion = prefs.getBool("motion", false); g_mmin = constrain(prefs.getInt("mmin", 10), 1, 240); g_msens = constrain(prefs.getInt("msens", 5), 1, 10);
   g_host = prefs.getString("host", DEFAULT_HOST);
