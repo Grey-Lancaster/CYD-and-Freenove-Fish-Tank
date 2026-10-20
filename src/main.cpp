@@ -5,6 +5,7 @@
 #include <Arduino.h>
 #include <TFT_eSPI.h>
 #include <WiFi.h>
+#include <ArduinoOTA.h>
 #include <time.h>
 #include "FT6336U.h"
 #if __has_include("secrets.h")
@@ -197,7 +198,6 @@ static void drawRays(float t) {
 
 // ---------------------------------------------------------------- clock
 static uint32_t baseSecs = 0;      // seconds since midnight at millis()==0 (fallback clock)
-static bool haveNtp = false;
 
 static void initClock() {
   int h = 0, m = 0, s = 0;
@@ -205,24 +205,31 @@ static void initClock() {
   baseSecs = h * 3600 + m * 60 + s;
 #ifdef WIFI_SSID
   WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+  WiFi.setHostname("fish-tank");
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   uint32_t t0 = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - t0 < 8000) delay(100);
-  if (WiFi.status() == WL_CONNECTED) {
-    configTzTime("EST5EDT,M3.2.0,M11.1.0", "pool.ntp.org", "time.nist.gov");
-    struct tm tmv;
-    if (getLocalTime(&tmv, 4000)) haveNtp = true;
-    WiFi.disconnect(true);
-    WiFi.mode(WIFI_OFF);
-  }
+  configTzTime("EST5EDT,M3.2.0,M11.1.0", "pool.ntp.org", "time.nist.gov");
+  // WiFi stays connected: NTP keeps syncing and OTA stays reachable.
+  ArduinoOTA.setHostname("fish-tank");
+#ifdef OTA_PASS
+  ArduinoOTA.setPassword(OTA_PASS);
+#endif
+  ArduinoOTA.onStart([]() { tft.fillScreen(TFT_BLACK); tft.setTextColor(TFT_WHITE); tft.drawString("OTA update...", 10, 10, 4); });
+  ArduinoOTA.onProgress([](unsigned int p, unsigned int total) {
+    tft.fillRect(10, 60, 460, 20, TFT_DARKGREY);
+    tft.fillRect(10, 60, (int)(460.0f * p / total), 20, TFT_GREEN);
+  });
+  ArduinoOTA.begin();
+  Serial.printf("WiFi %s, IP %s, OTA host fish-tank\n", WiFi.status() == WL_CONNECTED ? "connected" : "NOT connected", WiFi.localIP().toString().c_str());
 #endif
 }
 
 static void drawClock() {
   int h, m;
-  if (haveNtp) {
-    struct tm tmv;
-    getLocalTime(&tmv, 0);
+  struct tm tmv;
+  if (getLocalTime(&tmv, 0)) {
     h = tmv.tm_hour; m = tmv.tm_min;
   } else {
     uint32_t s = (baseSecs + millis() / 1000) % 86400;
@@ -293,7 +300,7 @@ void setup() {
   Serial.begin(115200);
   ft6336u.begin();
   tft.init();
-  tft.setRotation(1);
+  tft.setRotation(3);   // 180 deg from rotation 1: USB port on the left
   tft.fillScreen(TFT_BLACK);
   tft.setSwapBytes(true);
 
@@ -323,10 +330,15 @@ void loop() {
   if (dt > 0.1f) dt = 0.1f;
   float t = now / 1000.0f;
 
+#ifdef WIFI_SSID
+  ArduinoOTA.handle();
+  static uint32_t lastWifi = 0;
+  if (WiFi.status() != WL_CONNECTED && now - lastWifi > 30000) { lastWifi = now; WiFi.reconnect(); }
+#endif
   FT6336U_TouchPointType tp = ft6336u.scan();
   if (tp.touch_count != 0 && now - lastTouch > 120) {
     lastTouch = now;
-    float x = tp.tp[0].y, y = SH - tp.tp[0].x;
+    float x = SW - tp.tp[0].y, y = tp.tp[0].x;   // matches rotation 3
     for (int i = 0; i < 3; i++) spawnFood(x + random(-8, 9), max(y, 14.0f) + random(-4, 5));
   }
 
