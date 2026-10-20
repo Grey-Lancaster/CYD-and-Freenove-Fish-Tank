@@ -420,7 +420,7 @@ main{max-width:460px;margin:0 auto;padding:16px}h1{margin:.2em 0}
 .c{background:#12466f;border-radius:12px;padding:14px;margin:12px 0}
 label{display:flex;justify-content:space-between;align-items:center;margin:10px 0}
 input[type=range]{width:55%}select,button{font:inherit;padding:8px 12px;border-radius:8px;border:0}
-button{background:#2fb36b;color:#fff}small{color:#9cc4e4}</style></head><body><main>
+button,.b{background:#2fb36b;color:#fff;text-decoration:none;border-radius:8px;padding:8px 12px;margin-top:10px}small{color:#9cc4e4}</style></head><body><main>
 <h1>&#128032; Fish Tank</h1><small id="st">loading&hellip;</small>
 <div class="c"><label>Sound <input type="checkbox" id="snd"></label>
 <label>Volume <input type="range" id="vol" min="0" max="100"><span id="vv"></span></label>
@@ -429,6 +429,10 @@ button{background:#2fb36b;color:#fff}small{color:#9cc4e4}</style></head><body><m
 <div class="c"><button id="feed">Feed the fish</button>
 <label style="margin-top:14px">Auto feed <input type="checkbox" id="auto"></label>
 <label>Every (seconds) <input type="number" id="aint" min="5" max="3600" style="width:90px"></label></div>
+<div class="c"><button id="shot">Screenshot</button> <label style="display:inline"><input type="checkbox" id="live"> live view</label>
+<small id="shm"> (the tank pauses for a second while it copies)</small>
+<canvas id="cv" width="480" height="320" style="display:none;width:100%;margin-top:10px;border-radius:8px"></canvas>
+<a id="dl" style="display:none" class="b">Download PNG</a></div>
 <div class="c"><button id="apply">Apply</button> <small id="amsg"></small><br><small>Applies sound, volume, rotation and auto feed.</small></div>
 <div class="c"><label>Hostname <input id="host" maxlength="31" style="width:55%"></label>
 <small>letters, digits and dashes &mdash; reachable as <b id="hl"></b>.local</small><br><br>
@@ -441,6 +445,13 @@ async function load(){const s=await (await fetch('/api/status')).json();
 async function send(){busy=1;await fetch('/api/set?snd='+($('snd').checked?1:0)+'&vol='+$('vol').value+'&rot='+$('rot').value+'&h24='+($('h24').checked?1:0)+'&auto='+($('auto').checked?1:0)+'&aint='+$('aint').value,{method:'POST'});busy=0;dirty=0;$('amsg').textContent='Applied \u2713'}
 const mark=()=>{dirty=1;$('amsg').textContent='not applied yet'};
 ['snd','h24','auto','aint','rot'].forEach(i=>$(i).onchange=mark);$('vol').oninput=()=>{$('vv').textContent=$('vol').value;mark()};$('apply').onclick=send;
+async function shot(){const r=await fetch('/api/frame',{cache:'no-store'});const b=new Uint8Array(await r.arrayBuffer());
+ if(b.length!=480*320*2)return;const cv=$('cv'),x=cv.getContext('2d'),im=x.createImageData(480,320);
+ for(let i=0,o=0;i<b.length;i+=2,o+=4){const v=(b[i]<<8)|b[i+1];im.data[o]=((v>>11)&31)*255/31;im.data[o+1]=((v>>5)&63)*255/63;im.data[o+2]=(v&31)*255/31;im.data[o+3]=255}
+ x.putImageData(im,0,0);cv.style.display='block';
+ cv.toBlob(bl=>{const a=$('dl');a.href=URL.createObjectURL(bl);a.download='fishtank-'+new Date().toISOString().replace(/[:.]/g,'-').slice(0,19)+'.png';a.textContent='Download PNG';a.style.display='inline-block'})}
+$('shot').onclick=shot;
+$('live').onchange=()=>{clearInterval(window.lv);if($('live').checked){shot();window.lv=setInterval(shot,2500)}};
 $('feed').onclick=()=>fetch('/api/feed',{method:'POST'});
 $('hsave').onclick=async()=>{const h=$('host').value.trim().toLowerCase();
  const r=await fetch('/api/host?host='+encodeURIComponent(h),{method:'POST'});
@@ -488,6 +499,15 @@ static void setupWeb() {
     }
     saveSettings(); applySound();
     server.send(200, "application/json", statusJson());
+  });
+  // Raw copy of the last finished frame (480x320 RGB565, big-endian) for the page's screenshot button.
+  server.on("/api/frame", HTTP_GET, []() {
+    const size_t total = SW * SH * 2;
+    const uint8_t *p = (const uint8_t *)frame.getPointer();
+    server.setContentLength(total);
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(200, "application/octet-stream", "");
+    for (size_t off = 0; off < total; off += 4096) server.sendContent((const char *)p + off, min((size_t)4096, total - off));
   });
   server.on("/api/feed", HTTP_ANY, []() {
     feedAt(50 + random(SW - 100), 16, 5);
