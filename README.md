@@ -23,11 +23,13 @@ python3 ~/.platformio/packages/tool-esptoolpy/esptool.py --chip esp32s3 merge_bi
 ```
 Check byte 2 of the merged image is `0x02` (DIO; this board's octal PSRAM needs it).
 
-## Features (v1.1.0)
+## Features (v1.2.0)
 Three builds, one codebase: **Freenove FNK0104S** (`pio run -e freenove4`), **CYD 2.8"** with ILI9341 (`pio run -e cyd28`) and the **2-USB CYD 2.8"** with ST7789 (`pio run -e cyd28usb2`). Wrong colours on a CYD usually means the other CYD build.
 - Tap-to-feed (sonar ring + ding ding), auto feed, looping bubble sound, clock + date (12/24 h), BOOT info screen.
 - **WiFi is set up on the screen** with [TouchWifiProvisioner](https://github.com/Grey-Lancaster/TouchWifiProvisioner) (no credentials in the firmware). BOOT during setup = run offline.
 - Web settings page at `http://fishtank.local` (CYD: `cydfishtank.local`): sound, volume, rotation, **invert colours**, **swap red/blue**, auto feed, 12/24 h, hostname, screenshots, forget WiFi, recalibrate touch (CYD), WiFi **motion sleep** (ported from CYD PhotoFrame).
+- **Firmware update page** on the tank's web page (upload `Fish-Tank-<build>-update.bin`; keeps WiFi and settings). The factory `.bin` (and the web installer) wipe the board including saved WiFi.
+- **Treasure chest** that opens every so often and fills the tank with bubbles (button on the web page).
 - OTA updates: `espota.py -i <ip> -p 3232 -f .pio/build/<env>/firmware.bin -r` (hostname = the board's hostname).
 
 ## Rendering

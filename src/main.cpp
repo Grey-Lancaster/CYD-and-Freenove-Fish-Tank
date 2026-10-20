@@ -10,6 +10,7 @@
 #include <ESPmDNS.h>
 #include <Preferences.h>
 #include <time.h>
+#include <Update.h>
 #include "board.h"
 #include "canvas.h"
 #include "hal.h"
@@ -17,7 +18,7 @@
 #include "motion.h"
 #include "wifi_setup.h"
 
-#define FW_VERSION "1.1.0"
+#define FW_VERSION "1.2.0"
 
 TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite frame = TFT_eSprite(&tft);    // Freenove: the whole frame
@@ -454,6 +455,8 @@ button,.b{background:#2fb36b;color:#fff;text-decoration:none;border-radius:8px;p
 <div id="mlog" style="margin-top:8px;font-size:14px"></div>
 <button id="mclr">Clear log</button></div>
 <div class="c"><button id="apply">Apply</button> <small id="amsg"></small><br><small>Applies sound, volume, rotation and auto feed.</small></div>
+<div class="c"><b>Firmware update</b><br><small>Upload the <b>update</b> file for this board (not the factory file): it keeps your WiFi and settings.</small><br>
+<input type="file" id="fw" accept=".bin"><br><button id="fwb">Upload &amp; restart</button> <small id="fwmsg"></small></div>
 <div class="c"><b>System</b><br>
 <button id="wifi">Forget WiFi &amp; restart</button> <button id="recal" style="display:none">Recalibrate touch</button> <small id="sysmsg"></small></div>
 <div class="c"><label>Hostname <input id="host" maxlength="31" style="width:55%"></label>
@@ -463,7 +466,7 @@ button,.b{background:#2fb36b;color:#fff;text-decoration:none;border-radius:8px;p
 const $=i=>document.getElementById(i);let busy=0,dirty=0;
 async function load(){const s=await (await fetch('/api/status')).json();
  $('mlive').textContent=s.motion?(s.mready?'motion score '+s.mscore+(s.mon?' \u25cf moving':' (quiet)')+(s.asleep?' \u00b7 screen asleep':''):'sensor warming up\u2026'):'';
-$('recal').style.display=s.board=='cyd'?'inline-block':'none';
+window.envId=s.env;$('recal').style.display=s.board=='cyd'?'inline-block':'none';
 if(!busy&&!dirty){$('inv').checked=s.inv;$('swaprb').checked=s.swaprb;$('motion').checked=s.motion;$('mmin').value=s.mmin;$('msens').value=s.msens;$('h24').checked=s.h24;$('auto').checked=s.auto;$('aint').value=s.aint;if(document.activeElement!==$('host'))$('host').value=s.host;$('hl').textContent=s.host;$('snd').checked=s.snd;$('vol').value=s.vol;$('vv').textContent=s.vol;$('rot').value=s.rot}
  $('st').textContent='v'+s.ver+' · WiFi '+(s.ssid||'?')+' · '+s.ip+' · '+s.rssi+' dBm · up '+Math.floor(s.up/60)+' min · '+s.fps.toFixed(1)+' fps'}
 async function send(){busy=1;await fetch('/api/set?snd='+($('snd').checked?1:0)+'&vol='+$('vol').value+'&rot='+$('rot').value+'&motion='+($('motion').checked?1:0)+'&mmin='+$('mmin').value+'&msens='+$('msens').value+'&inv='+($('inv').checked?1:0)+'&swaprb='+($('swaprb').checked?1:0)+'&h24='+($('h24').checked?1:0)+'&auto='+($('auto').checked?1:0)+'&aint='+$('aint').value,{method:'POST'});busy=0;dirty=0;$('amsg').textContent='Applied \u2713'}
@@ -483,6 +486,12 @@ $('shot').onclick=shot;
 $('live').onchange=()=>{clearInterval(window.lv);if($('live').checked){shot();window.lv=setInterval(shot,2500)}};
 $('wifi').onclick=async()=>{if(!confirm('Forget all saved WiFi networks and restart? You will set up WiFi again on the screen.'))return;await fetch('/api/wifi/forget',{method:'POST'});$('sysmsg').textContent='Restarting\u2026'};
 $('recal').onclick=async()=>{if(!confirm('Restart and calibrate the touch screen again?'))return;await fetch('/api/recal',{method:'POST'});$('sysmsg').textContent='Restarting\u2026'};
+$('fwb').onclick=()=>{const f=$('fw').files[0];if(!f){$('fwmsg').textContent='choose a file first';return}
+ if(!f.name.includes(window.envId)&&!confirm('This file name does not contain "'+window.envId+'", so it may be for a different board. Continue anyway?'))return;
+ const x=new XMLHttpRequest(),fd=new FormData();fd.append('fw',f,f.name);x.open('POST','/update');
+ x.upload.onprogress=e=>$('fwmsg').textContent=Math.round(e.loaded*100/e.total)+'%';
+ x.onload=()=>{$('fwmsg').textContent=x.status==200?'Done. Restarting\u2026 reload this page in a few seconds.':'Update failed ('+x.responseText+')'};
+ x.onerror=()=>$('fwmsg').textContent='connection lost (it may be restarting)';x.send(fd)};
 $('chest').onclick=()=>fetch('/api/chest',{method:'POST'});
 $('feed').onclick=()=>fetch('/api/feed',{method:'POST'});
 $('hsave').onclick=async()=>{const h=$('host').value.trim().toLowerCase();
@@ -500,7 +509,7 @@ static String statusJson() {
   String ssid = WiFi.status() == WL_CONNECTED ? WiFi.SSID() : String("");
   ssid.replace("\\", ""); ssid.replace("\"", "");
   char b[700];
-  snprintf(b, sizeof(b), "{\"board\":\"%s\",\"inv\":%s,\"swaprb\":%s,\"motion\":%s,\"mmin\":%d,\"msens\":%d,\"mon\":%s,\"mready\":%s,\"mscore\":%.2f,\"asleep\":%s,\"h24\":%s,\"ssid\":\"%s\",\"snd\":%s,\"vol\":%d,\"rot\":%d,\"auto\":%s,\"aint\":%d,\"host\":\"%s\",\"ver\":\"" FW_VERSION "\",\"ip\":\"%s\",\"rssi\":%d,\"up\":%lu,\"fps\":%.1f}",
+  snprintf(b, sizeof(b), "{\"env\":\"" BOARD_ID "\",\"board\":\"%s\",\"inv\":%s,\"swaprb\":%s,\"motion\":%s,\"mmin\":%d,\"msens\":%d,\"mon\":%s,\"mready\":%s,\"mscore\":%.2f,\"asleep\":%s,\"h24\":%s,\"ssid\":\"%s\",\"snd\":%s,\"vol\":%d,\"rot\":%d,\"auto\":%s,\"aint\":%d,\"host\":\"%s\",\"ver\":\"" FW_VERSION "\",\"ip\":\"%s\",\"rssi\":%d,\"up\":%lu,\"fps\":%.1f}",
 #ifdef BOARD_CYD28
            "cyd",
 #else
@@ -583,6 +592,17 @@ static void setupWeb() {
   server.on("/api/feed", HTTP_ANY, []() {
     feedAt(50 + random(VW - 100), 16, 5);
     server.send(200, "application/json", "{\"ok\":true}");
+  });
+  server.on("/update", HTTP_POST, []() {
+    bool ok = !Update.hasError();
+    server.send(ok ? 200 : 500, "text/plain", ok ? "OK" : Update.errorString());
+    if (ok) restartAt = millis() + 1000;
+  }, []() {
+    HTTPUpload &up = server.upload();
+    if (up.status == UPLOAD_FILE_START) Update.begin(UPDATE_SIZE_UNKNOWN);
+    else if (up.status == UPLOAD_FILE_WRITE) Update.write(up.buf, up.currentSize);
+    else if (up.status == UPLOAD_FILE_END) Update.end(true);
+    else if (up.status == UPLOAD_FILE_ABORTED) Update.abort();
   });
   server.on("/api/chest", HTTP_ANY, []() {
     if (chestState == CHEST_CLOSED) { chestState = CHEST_OPENING; chestT = 0; }
