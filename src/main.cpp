@@ -18,7 +18,7 @@
 #include "motion.h"
 #include "wifi_setup.h"
 
-#define FW_VERSION "1.2.0"
+#define FW_VERSION "1.3.0"
 
 TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite frame = TFT_eSprite(&tft);    // Freenove: the whole frame
