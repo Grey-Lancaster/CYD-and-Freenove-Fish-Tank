@@ -20,7 +20,7 @@
 #include "motion.h"
 #include "wifi_setup.h"
 
-#define FW_VERSION "1.4.3"
+#define FW_VERSION "1.5.0"
 
 TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite frame = TFT_eSprite(&tft);    // Freenove: the whole frame
@@ -39,6 +39,11 @@ bool g_motion = false;         // Wi-Fi motion sensing: screen sleeps when nobod
 int g_mmin = 10;               // minutes without motion before sleeping
 int g_msens = 5;               // 1..10
 volatile bool g_asleep = false;
+volatile bool g_isNight = false;   // inside the night window: screen and sound off
+bool g_night = false;          // night mode enabled
+int g_nstart = 22 * 60;        // minutes after midnight the screen turns off
+int g_nend = 7 * 60;           // minutes after midnight it turns back on
+static uint32_t nightWakeUntil = 0;   // a touch / BOOT lights the screen for a minute at night
 static uint32_t lastActivity = 0;
 bool g_invert = false;         // flip the panel's colour inversion
 bool g_swaprb = DEFAULT_SWAPRB;  // swap red/blue
@@ -63,6 +68,7 @@ static void saveSettings() {
   prefs.putBool("afeed", g_auto); prefs.putInt("aint", g_aint); prefs.putBool("h24", g_h24); prefs.putString("tz", g_tz); prefs.putInt("dfmt", g_datefmt);
   prefs.putBool("invert", g_invert); prefs.putBool("swaprb", g_swaprb);
   prefs.putBool("motion", g_motion); prefs.putInt("mmin", g_mmin); prefs.putInt("msens", g_msens);
+  prefs.putBool("night", g_night); prefs.putInt("nstart", g_nstart); prefs.putInt("nend", g_nend);
 }
 
 // ---------------------------------------------------------------- fish
@@ -411,11 +417,13 @@ static void updateWorld(float dt, float t, uint32_t now) {
 
 
 // ---------------------------------------------------------------- motion sleep
+static void applyBacklight() { halBacklight(!(g_asleep || g_isNight)); }
+
 static void wakeScreen(uint8_t cause) {
   if (!g_asleep) return;
   g_asleep = false;
   motionLogEvent(false, cause);
-  halBacklight(true);
+  applyBacklight();
   lastActivity = millis();
 }
 
@@ -443,8 +451,36 @@ static void updateSleep() {
     sleepAt = now;
     motionRebaseline();
     motionLogEvent(true, 0);
-    halBacklight(false);
+    applyBacklight();
   }
+}
+
+// ---- night mode: screen and sound off between two times of day (local time; needs the clock to be set)
+static bool inNightWindow() {
+  if (!g_night) return false;
+  struct tm t;
+  if (!getLocalTime(&t, 0)) return false;
+  int now = t.tm_hour * 60 + t.tm_min;
+  if (g_nstart == g_nend) return false;
+  return g_nstart < g_nend ? (now >= g_nstart && now < g_nend) : (now >= g_nstart || now < g_nend);
+}
+
+static void updateNight(uint32_t now) {
+  static uint32_t last = 0;
+  if (now - last < 1000) return;
+  last = now;
+  bool night = inNightWindow() && now >= nightWakeUntil;
+  if (night != g_isNight) { g_isNight = night; applyBacklight(); if (!night) lastActivity = now; }
+}
+
+// A touch or BOOT while it is dark lights the screen for a minute.
+static bool nightWake(uint32_t now) {
+  if (!g_isNight) return false;
+  nightWakeUntil = now + 60000;
+  g_isNight = false;
+  applyBacklight();
+  lastActivity = now;
+  return true;
 }
 
 static const char PAGE[] PROGMEM = R"HTML(<!doctype html><html><head><meta charset="utf-8">
@@ -482,6 +518,11 @@ button,.b{background:#2fb36b;color:#fff;text-decoration:none;border-radius:8px;p
 <small id="shm"> (the tank pauses for a second while it copies)</small>
 <canvas id="cv" width="480" height="320" style="display:none;width:100%;margin-top:10px;border-radius:8px"></canvas>
 <a id="dl" style="display:none" class="b">Download PNG</a></div>
+<div class="c"><b>Night mode</b> <small id="nstat"></small>
+<label>Screen and sound off at night <input type="checkbox" id="night"></label>
+<label>Off from <input type="time" id="nstart"></label>
+<label>Back on at <input type="time" id="nend"></label>
+<small>Uses the time zone above (the clock must be set). Touch the screen or press BOOT to light it for a minute.</small></div>
 <div class="c"><b>Motion sleep</b> <small>(experimental)</small>
 <label>Sleep the screen when nobody is around <input type="checkbox" id="motion"></label>
 <label>Sleep after (minutes) <input type="number" id="mmin" min="1" max="240" style="width:90px"></label>
@@ -504,12 +545,13 @@ async function load(){const s=await (await fetch('/api/status')).json();
 window.envId=s.env;$('recal').style.display=s.board=='cyd'?'inline-block':'none';
 $('now').textContent=s.now+(s.ntp?'  (internet time)':'');
 if(!s.ntp&&!window.timeSent){window.timeSent=1;fetch('/api/settime?epoch='+Math.floor(Date.now()/1000),{method:'POST'})}
-if(!busy&&!dirty){$('tz').value=s.tz;$('dfmt').value=s.dfmt;$('inv').checked=s.inv;$('swaprb').checked=s.swaprb;$('motion').checked=s.motion;$('mmin').value=s.mmin;$('msens').value=s.msens;$('h24').checked=s.h24;$('auto').checked=s.auto;$('aint').value=s.aint;if(document.activeElement!==$('host'))$('host').value=s.host;$('hl').textContent=s.host;$('snd').checked=s.snd;$('vol').value=s.vol;$('vv').textContent=s.vol;$('rot').value=s.rot}
+$('nstat').textContent=s.isnight?'(it is night now: screen off)':'';
+if(!busy&&!dirty){$('night').checked=s.night;$('nstart').value=s.nstart;$('nend').value=s.nend;$('tz').value=s.tz;$('dfmt').value=s.dfmt;$('inv').checked=s.inv;$('swaprb').checked=s.swaprb;$('motion').checked=s.motion;$('mmin').value=s.mmin;$('msens').value=s.msens;$('h24').checked=s.h24;$('auto').checked=s.auto;$('aint').value=s.aint;if(document.activeElement!==$('host'))$('host').value=s.host;$('hl').textContent=s.host;$('snd').checked=s.snd;$('vol').value=s.vol;$('vv').textContent=s.vol;$('rot').value=s.rot}
  $('st').textContent='v'+s.ver+' · WiFi '+(s.ssid||'?')+' · '+s.ip+' · '+s.rssi+' dBm · up '+Math.floor(s.up/60)+' min · '+s.fps.toFixed(1)+' fps'}
 async function send(){if(!$('mmin').value||!$('aint').value){$('amsg').textContent='enter a number in the sleep / auto feed boxes';return}
-busy=1;await fetch('/api/set?snd='+($('snd').checked?1:0)+'&vol='+$('vol').value+'&rot='+$('rot').value+'&motion='+($('motion').checked?1:0)+'&mmin='+$('mmin').value+'&msens='+$('msens').value+'&inv='+($('inv').checked?1:0)+'&swaprb='+($('swaprb').checked?1:0)+'&tz='+encodeURIComponent($('tz').value)+'&dfmt='+$('dfmt').value+'&h24='+($('h24').checked?1:0)+'&auto='+($('auto').checked?1:0)+'&aint='+$('aint').value,{method:'POST'});busy=0;dirty=0;$('amsg').textContent='Applied \u2713'}
+busy=1;await fetch('/api/set?snd='+($('snd').checked?1:0)+'&vol='+$('vol').value+'&rot='+$('rot').value+'&motion='+($('motion').checked?1:0)+'&mmin='+$('mmin').value+'&msens='+$('msens').value+'&inv='+($('inv').checked?1:0)+'&swaprb='+($('swaprb').checked?1:0)+'&night='+($('night').checked?1:0)+($('nstart').value?'&nstart='+$('nstart').value:'')+($('nend').value?'&nend='+$('nend').value:'')+'&tz='+encodeURIComponent($('tz').value)+'&dfmt='+$('dfmt').value+'&h24='+($('h24').checked?1:0)+'&auto='+($('auto').checked?1:0)+'&aint='+$('aint').value,{method:'POST'});busy=0;dirty=0;$('amsg').textContent='Applied \u2713'}
 const mark=()=>{dirty=1;$('amsg').textContent='not applied yet'};
-['snd','h24','auto','aint','rot','motion','mmin','msens','inv','swaprb','tz','dfmt'].forEach(i=>{$(i).onchange=mark;$(i).oninput=mark});$('vol').oninput=()=>{$('vv').textContent=$('vol').value;mark()};$('apply').onclick=send;
+['snd','h24','auto','aint','rot','motion','mmin','msens','inv','swaprb','tz','dfmt','night','nstart','nend'].forEach(i=>{$(i).onchange=mark;$(i).oninput=mark});$('vol').oninput=()=>{$('vv').textContent=$('vol').value;mark()};$('apply').onclick=send;
 const CAUSE=['no motion','motion','touch','BOOT button','setting turned off','sensor offline'];
 async function mlog(){try{const a=await (await fetch('/api/motionlog')).json();
  $('mlog').innerHTML=a.length?a.map(e=>(e.e?'\u2600 woke':'\u263e slept')+' \u00b7 '+(e.w||'up '+Math.floor(e.up/60)+' min')+' \u00b7 '+CAUSE[e.c]).join('<br>'):'<small>No sleep/wake events yet.</small>'}catch(e){}}
@@ -570,10 +612,11 @@ static bool ntpSynced() { return sntp_get_sync_status() == SNTP_SYNC_STATUS_COMP
 static String statusJson() {
   String ssid = WiFi.status() == WL_CONNECTED ? WiFi.SSID() : String("");
   ssid.replace("\\", ""); ssid.replace("\"", "");
-  char b[1000];
+  char b[1100];
   char tbuf[16], dbuf[24];
   clockStrings(tbuf, sizeof(tbuf), dbuf, sizeof(dbuf));
-  snprintf(b, sizeof(b), "{\"rst\":\"%s\",\"timeset\":%s,\"ntp\":%s,\"tz\":\"%s\",\"dfmt\":%d,\"now\":\"%s  %s\",\"env\":\"" BOARD_ID "\",\"board\":\"%s\",\"inv\":%s,\"swaprb\":%s,\"motion\":%s,\"mmin\":%d,\"msens\":%d,\"mon\":%s,\"mready\":%s,\"mscore\":%.2f,\"asleep\":%s,\"h24\":%s,\"ssid\":\"%s\",\"snd\":%s,\"vol\":%d,\"rot\":%d,\"auto\":%s,\"aint\":%d,\"host\":\"%s\",\"ver\":\"" FW_VERSION "\",\"ip\":\"%s\",\"rssi\":%d,\"up\":%lu,\"fps\":%.1f}",
+  snprintf(b, sizeof(b), "{\"night\":%s,\"nstart\":\"%02d:%02d\",\"nend\":\"%02d:%02d\",\"isnight\":%s,\"rst\":\"%s\",\"timeset\":%s,\"ntp\":%s,\"tz\":\"%s\",\"dfmt\":%d,\"now\":\"%s  %s\",\"env\":\"" BOARD_ID "\",\"board\":\"%s\",\"inv\":%s,\"swaprb\":%s,\"motion\":%s,\"mmin\":%d,\"msens\":%d,\"mon\":%s,\"mready\":%s,\"mscore\":%.2f,\"asleep\":%s,\"h24\":%s,\"ssid\":\"%s\",\"snd\":%s,\"vol\":%d,\"rot\":%d,\"auto\":%s,\"aint\":%d,\"host\":\"%s\",\"ver\":\"" FW_VERSION "\",\"ip\":\"%s\",\"rssi\":%d,\"up\":%lu,\"fps\":%.1f}",
+           g_night ? "true" : "false", g_nstart / 60, g_nstart % 60, g_nend / 60, g_nend % 60, g_isNight ? "true" : "false",
            resetReasonShort(), timeIsSet() ? "true" : "false", ntpSynced() ? "true" : "false",
            g_tz.c_str(), g_datefmt, tbuf, dbuf,
 #ifdef BOARD_CYD28
@@ -635,6 +678,12 @@ static void setupWeb() {
     if (numArg("auto", 0, 1, v)) g_auto = v != 0;
     if (numArg("aint", 5, 3600, v)) g_aint = v;
     if (numArg("dfmt", 0, 4, v)) g_datefmt = v;
+    if (numArg("night", 0, 1, v)) g_night = v != 0;
+    for (int k = 0; k < 2; k++) {
+      String s = server.arg(k ? "nend" : "nstart"); s.trim();
+      int c = s.indexOf(':');
+      if (c > 0) { int h = s.substring(0, c).toInt(), mi = s.substring(c + 1).toInt(); if (h >= 0 && h < 24 && mi >= 0 && mi < 60) (k ? g_nend : g_nstart) = h * 60 + mi; }
+    }
     if (server.hasArg("tz")) {
       String z = server.arg("tz"); z.trim();
       bool ok = z.length() >= 3 && z.length() <= 47;
@@ -845,6 +894,7 @@ void setup() {
   g_invert = prefs.getBool("invert", false); g_swaprb = prefs.getBool("swaprb", DEFAULT_SWAPRB);
   g_motion = prefs.getBool("motion", false); g_mmin = constrain(prefs.getInt("mmin", 10), 1, 240); g_msens = constrain(prefs.getInt("msens", 5), 1, 10);
   g_host = prefs.getString("host", DEFAULT_HOST);
+  g_night = prefs.getBool("night", false); g_nstart = constrain(prefs.getInt("nstart", 22 * 60), 0, 1439); g_nend = constrain(prefs.getInt("nend", 7 * 60), 0, 1439);
   setenv("TZ", g_tz.c_str(), 1); tzset();
   { uint32_t lt = prefs.getUInt("lastt", 0);                    // restore the last saved time (no battery clock)
     if (lt > 1700000000UL) { struct timeval tv = {(time_t)lt + 5, 0}; settimeofday(&tv, nullptr); } }
@@ -910,7 +960,7 @@ void loop() {
   bool btn = digitalRead(0);
   if (!btn && lastBtn) {
     lastActivity = now;
-    if (g_asleep) wakeScreen(3); else infoUntil = (infoUntil > now) ? 0 : now + 20000;
+    if (nightWake(now)) {} else if (g_asleep) wakeScreen(3); else infoUntil = (infoUntil > now) ? 0 : now + 20000;
   }
   lastBtn = btn;
 
@@ -919,15 +969,18 @@ void loop() {
   if (touched) lastActivity = now;
   if (touched && now - lastTouch > 120) {
     lastTouch = now;
-    if (g_asleep) {
+    if (nightWake(now)) {
+      // touched in the dark: just light the screen
+    } else if (g_asleep) {
       wakeScreen(2);                  // the first touch only wakes the screen
     } else {
       feedAt(px / cv.sx, max(py / cv.sy, 14.0f), 3);
     }
   }
 
+  updateNight(now);
   updateSleep();
-  if (g_asleep) { delay(40); return; }       // screen off: no rendering
+  if (g_asleep || g_isNight) { delay(40); return; }       // screen off: no rendering
 
   updateWorld(dt, t, now);
   curT = t; curNow = now;

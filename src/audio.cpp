@@ -16,7 +16,7 @@ void audioMix(int16_t *out, int n) {
   const size_t len = (bubbles_end - bubbles_start) / 2;
   const int16_t *fx = (const int16_t *)feed_start;
   const size_t fxN = (feed_end - feed_start) / 2;
-  const bool on = g_snd && !g_asleep;
+  const bool on = g_snd && !g_asleep && !g_isNight;
   for (int i = 0; i < n; i++) {
     int32_t s = pcm[idx];
     size_t fp = g_fxPos;
