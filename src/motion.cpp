@@ -28,6 +28,8 @@ static volatile bool s_motion = false;
 static volatile bool s_ready = false;
 static volatile float s_score = 0;
 
+static volatile bool s_rebase = false;
+void motionRebaseline() { s_rebase = true; }   // relearn the quiet level (after the screen sleeps or wakes)
 bool motionDetected() { return s_motion; }
 static volatile uint32_t s_readyAt = 0;
 // True while sensing works; a short gap in the packets does not count as a failure.
@@ -139,6 +141,7 @@ static void motionTask(void *) {
         if (sock >= 0) { lwip_close(sock); sock = -1; }
       }
     }
+    if (s_rebase) { s_rebase = false; baseline = 0; hitsOn = hitsOff = 0; s_motion = false; }
     if (!csiOn) {
       vTaskDelay(pdMS_TO_TICKS(500));
       continue;

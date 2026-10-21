@@ -20,7 +20,7 @@
 #include "motion.h"
 #include "wifi_setup.h"
 
-#define FW_VERSION "1.4.1"
+#define FW_VERSION "1.4.2"
 
 TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite frame = TFT_eSprite(&tft);    // Freenove: the whole frame
@@ -428,13 +428,20 @@ static void updateSleep() {
   if (now - last < 250) return;
   last = now;
   if (!g_motion) { wakeScreen(4); return; }
-  if (!motionReady() || motionDetected()) {
+  // Right after the screen goes dark the radio environment changes (backlight current), which used to look like
+  // motion and woke the screen again within seconds: ignore motion for a while after sleeping and relearn the quiet level.
+  static uint32_t sleepAt = 0;
+  bool motionNow = motionDetected() && !(g_asleep && now - sleepAt < 20000);
+  if (!motionReady() || motionNow) {
     lastActivity = now;
-    wakeScreen(motionDetected() ? 1 : 5);
+    if (g_asleep) motionRebaseline();
+    wakeScreen(motionNow ? 1 : 5);
     return;
   }
   if (!g_asleep && now - lastActivity >= (uint32_t)g_mmin * 60000UL) {
     g_asleep = true;
+    sleepAt = now;
+    motionRebaseline();
     motionLogEvent(true, 0);
     halBacklight(false);
   }
@@ -536,6 +543,18 @@ load();setInterval(load,5000);
 </script></main></body></html>)HTML";
 
 
+static const char *resetReasonShort() {
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON: return "power-on";
+    case ESP_RST_EXT: return "reset button";
+    case ESP_RST_SW: return "restart";
+    case ESP_RST_PANIC: return "CRASH";
+    case ESP_RST_INT_WDT: case ESP_RST_TASK_WDT: case ESP_RST_WDT: return "watchdog";
+    case ESP_RST_BROWNOUT: return "brownout";
+    default: return "other";
+  }
+}
+
 // The boards have no battery clock. Time comes from NTP, from a device's browser (web page) or, after a restart,
 // from the last time we saved (so the clock is roughly right immediately).
 static bool timeIsSet() { struct tm t; return getLocalTime(&t, 0); }
@@ -553,8 +572,8 @@ static String statusJson() {
   char b[1000];
   char tbuf[16], dbuf[24];
   clockStrings(tbuf, sizeof(tbuf), dbuf, sizeof(dbuf));
-  snprintf(b, sizeof(b), "{\"timeset\":%s,\"ntp\":%s,\"tz\":\"%s\",\"dfmt\":%d,\"now\":\"%s  %s\",\"env\":\"" BOARD_ID "\",\"board\":\"%s\",\"inv\":%s,\"swaprb\":%s,\"motion\":%s,\"mmin\":%d,\"msens\":%d,\"mon\":%s,\"mready\":%s,\"mscore\":%.2f,\"asleep\":%s,\"h24\":%s,\"ssid\":\"%s\",\"snd\":%s,\"vol\":%d,\"rot\":%d,\"auto\":%s,\"aint\":%d,\"host\":\"%s\",\"ver\":\"" FW_VERSION "\",\"ip\":\"%s\",\"rssi\":%d,\"up\":%lu,\"fps\":%.1f}",
-           timeIsSet() ? "true" : "false", ntpSynced() ? "true" : "false",
+  snprintf(b, sizeof(b), "{\"rst\":\"%s\",\"timeset\":%s,\"ntp\":%s,\"tz\":\"%s\",\"dfmt\":%d,\"now\":\"%s  %s\",\"env\":\"" BOARD_ID "\",\"board\":\"%s\",\"inv\":%s,\"swaprb\":%s,\"motion\":%s,\"mmin\":%d,\"msens\":%d,\"mon\":%s,\"mready\":%s,\"mscore\":%.2f,\"asleep\":%s,\"h24\":%s,\"ssid\":\"%s\",\"snd\":%s,\"vol\":%d,\"rot\":%d,\"auto\":%s,\"aint\":%d,\"host\":\"%s\",\"ver\":\"" FW_VERSION "\",\"ip\":\"%s\",\"rssi\":%d,\"up\":%lu,\"fps\":%.1f}",
+           resetReasonShort(), timeIsSet() ? "true" : "false", ntpSynced() ? "true" : "false",
            g_tz.c_str(), g_datefmt, tbuf, dbuf,
 #ifdef BOARD_CYD28
            "cyd",
@@ -717,7 +736,7 @@ static void drawInfo(uint32_t now) {
   cv.setTextColor(RGB(220, 235, 250));
   snprintf(b, sizeof(b), "WiFi: %s  (%d dBm)", WiFi.status() == WL_CONNECTED ? WiFi.SSID().c_str() : "not connected", WiFi.RSSI());
   cv.drawString(b, 46, 172, FONT_SMALL);
-  snprintf(b, sizeof(b), "Up %lu min  Free %u KB  %.1f fps", millis() / 60000UL, (unsigned)(ESP.getFreeHeap() / 1024), g_fps);
+  snprintf(b, sizeof(b), "Up %lu min  Reset: %s  %.1f fps", millis() / 60000UL, resetReasonShort(), g_fps);
   cv.drawString(b, 46, 194, FONT_SMALL);
   snprintf(b, sizeof(b), "Sound %s, vol %d   %s", g_snd ? "on" : "off", (int)g_vol, BOARD_NAME);
   cv.drawString(b, 46, 216, FONT_SMALL);

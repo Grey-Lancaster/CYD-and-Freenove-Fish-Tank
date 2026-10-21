@@ -4,6 +4,7 @@
 
 void motionBegin();          // starts the sensing task (idle until enabled and online)
 bool motionDetected();       // someone is moving nearby
+void motionRebaseline();     // relearn the quiet level
 bool motionReady();          // sensing is running and warmed up
 float motionScore();         // >= 1 means motion; for tuning
 // causes: 0 no motion, 1 motion, 2 touch, 3 BOOT button, 4 setting turned off, 5 sensor offline
