@@ -20,7 +20,7 @@
 #include "motion.h"
 #include "wifi_setup.h"
 
-#define FW_VERSION "1.4.2"
+#define FW_VERSION "1.4.3"
 
 TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite frame = TFT_eSprite(&tft);    // Freenove: the whole frame
@@ -506,9 +506,10 @@ $('now').textContent=s.now+(s.ntp?'  (internet time)':'');
 if(!s.ntp&&!window.timeSent){window.timeSent=1;fetch('/api/settime?epoch='+Math.floor(Date.now()/1000),{method:'POST'})}
 if(!busy&&!dirty){$('tz').value=s.tz;$('dfmt').value=s.dfmt;$('inv').checked=s.inv;$('swaprb').checked=s.swaprb;$('motion').checked=s.motion;$('mmin').value=s.mmin;$('msens').value=s.msens;$('h24').checked=s.h24;$('auto').checked=s.auto;$('aint').value=s.aint;if(document.activeElement!==$('host'))$('host').value=s.host;$('hl').textContent=s.host;$('snd').checked=s.snd;$('vol').value=s.vol;$('vv').textContent=s.vol;$('rot').value=s.rot}
  $('st').textContent='v'+s.ver+' · WiFi '+(s.ssid||'?')+' · '+s.ip+' · '+s.rssi+' dBm · up '+Math.floor(s.up/60)+' min · '+s.fps.toFixed(1)+' fps'}
-async function send(){busy=1;await fetch('/api/set?snd='+($('snd').checked?1:0)+'&vol='+$('vol').value+'&rot='+$('rot').value+'&motion='+($('motion').checked?1:0)+'&mmin='+$('mmin').value+'&msens='+$('msens').value+'&inv='+($('inv').checked?1:0)+'&swaprb='+($('swaprb').checked?1:0)+'&tz='+encodeURIComponent($('tz').value)+'&dfmt='+$('dfmt').value+'&h24='+($('h24').checked?1:0)+'&auto='+($('auto').checked?1:0)+'&aint='+$('aint').value,{method:'POST'});busy=0;dirty=0;$('amsg').textContent='Applied \u2713'}
+async function send(){if(!$('mmin').value||!$('aint').value){$('amsg').textContent='enter a number in the sleep / auto feed boxes';return}
+busy=1;await fetch('/api/set?snd='+($('snd').checked?1:0)+'&vol='+$('vol').value+'&rot='+$('rot').value+'&motion='+($('motion').checked?1:0)+'&mmin='+$('mmin').value+'&msens='+$('msens').value+'&inv='+($('inv').checked?1:0)+'&swaprb='+($('swaprb').checked?1:0)+'&tz='+encodeURIComponent($('tz').value)+'&dfmt='+$('dfmt').value+'&h24='+($('h24').checked?1:0)+'&auto='+($('auto').checked?1:0)+'&aint='+$('aint').value,{method:'POST'});busy=0;dirty=0;$('amsg').textContent='Applied \u2713'}
 const mark=()=>{dirty=1;$('amsg').textContent='not applied yet'};
-['snd','h24','auto','aint','rot','motion','mmin','msens','inv','swaprb','tz','dfmt'].forEach(i=>$(i).onchange=mark);$('vol').oninput=()=>{$('vv').textContent=$('vol').value;mark()};$('apply').onclick=send;
+['snd','h24','auto','aint','rot','motion','mmin','msens','inv','swaprb','tz','dfmt'].forEach(i=>{$(i).onchange=mark;$(i).oninput=mark});$('vol').oninput=()=>{$('vv').textContent=$('vol').value;mark()};$('apply').onclick=send;
 const CAUSE=['no motion','motion','touch','BOOT button','setting turned off','sensor offline'];
 async function mlog(){try{const a=await (await fetch('/api/motionlog')).json();
  $('mlog').innerHTML=a.length?a.map(e=>(e.e?'\u2600 woke':'\u263e slept')+' \u00b7 '+(e.w||'up '+Math.floor(e.up/60)+' min')+' \u00b7 '+CAUSE[e.c]).join('<br>'):'<small>No sleep/wake events yet.</small>'}catch(e){}}
@@ -595,6 +596,15 @@ static void renderStrip(int i) {
 }
 #endif
 
+// A numeric request argument, only if it is present and not empty (an empty value must not reset a setting to its minimum).
+static bool numArg(const char *name, int lo, int hi, int &out) {
+  if (!server.hasArg(name)) return false;
+  String v = server.arg(name); v.trim();
+  if (!v.length()) return false;
+  out = constrain((int)v.toInt(), lo, hi);
+  return true;
+}
+
 static void setupWeb() {
   server.on("/", HTTP_GET, []() {
     String p = FPSTR(PAGE);
@@ -615,27 +625,27 @@ static void setupWeb() {
     restartAt = millis() + 800;
   });
   server.on("/api/set", HTTP_ANY, []() {
-    if (server.hasArg("vol")) g_vol = constrain(server.arg("vol").toInt(), 0, 100);
-    if (server.hasArg("snd")) g_snd = server.arg("snd").toInt() != 0;
-    if (server.hasArg("motion")) g_motion = server.arg("motion").toInt() != 0;
-    if (server.hasArg("mmin")) g_mmin = constrain(server.arg("mmin").toInt(), 1, 240);
-    if (server.hasArg("msens")) g_msens = constrain(server.arg("msens").toInt(), 1, 10);
-    if (server.hasArg("h24")) g_h24 = server.arg("h24").toInt() != 0;
-    if (server.hasArg("dfmt")) g_datefmt = constrain(server.arg("dfmt").toInt(), 0, 4);
+    int v;
+    if (numArg("vol", 0, 100, v)) g_vol = v;
+    if (numArg("snd", 0, 1, v)) g_snd = v != 0;
+    if (numArg("motion", 0, 1, v)) g_motion = v != 0;
+    if (numArg("mmin", 1, 240, v)) g_mmin = v;
+    if (numArg("msens", 1, 10, v)) g_msens = v;
+    if (numArg("h24", 0, 1, v)) g_h24 = v != 0;
+    if (numArg("auto", 0, 1, v)) g_auto = v != 0;
+    if (numArg("aint", 5, 3600, v)) g_aint = v;
+    if (numArg("dfmt", 0, 4, v)) g_datefmt = v;
     if (server.hasArg("tz")) {
       String z = server.arg("tz"); z.trim();
       bool ok = z.length() >= 3 && z.length() <= 47;
       for (size_t i = 0; ok && i < z.length(); i++) { char c = z[i]; ok = isalnum((unsigned char)c) || strchr(",.:/+-", c); }
       if (ok && z != g_tz) { g_tz = z; setenv("TZ", g_tz.c_str(), 1); tzset(); }
     }
-    if (server.hasArg("auto")) g_auto = server.arg("auto").toInt() != 0;
-    if (server.hasArg("aint")) g_aint = constrain(server.arg("aint").toInt(), 5, 3600);
     bool colorsChanged = false;
-    if (server.hasArg("inv")) { bool v = server.arg("inv").toInt() != 0; colorsChanged |= v != g_invert; g_invert = v; }
-    if (server.hasArg("swaprb")) { bool v = server.arg("swaprb").toInt() != 0; colorsChanged |= v != g_swaprb; g_swaprb = v; }
-    if (server.hasArg("rot")) {
-      int r = server.arg("rot").toInt();
-      if ((r == 1 || r == 3) && r != g_rot) { g_rot = r; halApplyRotation(); colorsChanged = false; }
+    if (numArg("inv", 0, 1, v)) { bool b = v != 0; colorsChanged |= b != g_invert; g_invert = b; }
+    if (numArg("swaprb", 0, 1, v)) { bool b = v != 0; colorsChanged |= b != g_swaprb; g_swaprb = b; }
+    if (numArg("rot", 0, 3, v)) {
+      if ((v == 1 || v == 3) && v != g_rot) { g_rot = v; halApplyRotation(); colorsChanged = false; }
     }
     if (colorsChanged) halApplyColors();
     saveSettings(); halApplySound();
