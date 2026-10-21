@@ -20,7 +20,7 @@
 #include "motion.h"
 #include "wifi_setup.h"
 
-#define FW_VERSION "1.5.0"
+#define FW_VERSION "1.5.1"
 
 TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite frame = TFT_eSprite(&tft);    // Freenove: the whole frame
@@ -520,8 +520,8 @@ button,.b{background:#2fb36b;color:#fff;text-decoration:none;border-radius:8px;p
 <a id="dl" style="display:none" class="b">Download PNG</a></div>
 <div class="c"><b>Night mode</b> <small id="nstat"></small>
 <label>Screen and sound off at night <input type="checkbox" id="night"></label>
-<label>Off from <input type="time" id="nstart"></label>
-<label>Back on at <input type="time" id="nend"></label>
+<label>Off from <span><select id="nstart_h"></select> : <select id="nstart_m"></select></span></label>
+<label>Back on at <span><select id="nend_h"></select> : <select id="nend_m"></select></span></label>
 <small>Uses the time zone above (the clock must be set). Touch the screen or press BOOT to light it for a minute.</small></div>
 <div class="c"><b>Motion sleep</b> <small>(experimental)</small>
 <label>Sleep the screen when nobody is around <input type="checkbox" id="motion"></label>
@@ -540,18 +540,26 @@ button,.b{background:#2fb36b;color:#fff;text-decoration:none;border-radius:8px;p
 <button id="hsave">Save &amp; reboot</button> <small id="hmsg"></small></div>
 <script>
 const $=i=>document.getElementById(i);let busy=0,dirty=0;
+function fillTime(id){const h=$(id+'_h'),mi=$(id+'_m');if(h.options.length)return;
+ for(let i=0;i<24;i++){const t=i==0?'12 AM (midnight)':i<12?i+' AM':i==12?'12 PM (noon)':(i-12)+' PM';h.add(new Option(t,i))}
+ for(let i=0;i<60;i+=5)mi.add(new Option(String(i).padStart(2,'0'),i))}
+function setTime(id,v){fillTime(id);const p=(v||'0:0').split(':'),h=+p[0],mm=+p[1],mi=$(id+'_m');
+ if(![...mi.options].some(o=>+o.value==mm)){const vals=[...mi.options].map(o=>+o.value);vals.push(mm);vals.sort((a,b)=>a-b);mi.innerHTML='';vals.forEach(x=>mi.add(new Option(String(x).padStart(2,'0'),x)))}
+ $(id+'_h').value=h;mi.value=mm}
+function getTime(id){return $(id+'_h').value+':'+String($(id+'_m').value).padStart(2,'0')}
+fillTime('nstart');fillTime('nend');
 async function load(){const s=await (await fetch('/api/status')).json();
  $('mlive').textContent=s.motion?(s.mready?'motion score '+s.mscore+(s.mon?' \u25cf moving':' (quiet)')+(s.asleep?' \u00b7 screen asleep':''):'sensor warming up\u2026'):'';
 window.envId=s.env;$('recal').style.display=s.board=='cyd'?'inline-block':'none';
 $('now').textContent=s.now+(s.ntp?'  (internet time)':'');
 if(!s.ntp&&!window.timeSent){window.timeSent=1;fetch('/api/settime?epoch='+Math.floor(Date.now()/1000),{method:'POST'})}
 $('nstat').textContent=s.isnight?'(it is night now: screen off)':'';
-if(!busy&&!dirty){$('night').checked=s.night;$('nstart').value=s.nstart;$('nend').value=s.nend;$('tz').value=s.tz;$('dfmt').value=s.dfmt;$('inv').checked=s.inv;$('swaprb').checked=s.swaprb;$('motion').checked=s.motion;$('mmin').value=s.mmin;$('msens').value=s.msens;$('h24').checked=s.h24;$('auto').checked=s.auto;$('aint').value=s.aint;if(document.activeElement!==$('host'))$('host').value=s.host;$('hl').textContent=s.host;$('snd').checked=s.snd;$('vol').value=s.vol;$('vv').textContent=s.vol;$('rot').value=s.rot}
+if(!busy&&!dirty){$('night').checked=s.night;setTime('nstart',s.nstart);setTime('nend',s.nend);$('tz').value=s.tz;$('dfmt').value=s.dfmt;$('inv').checked=s.inv;$('swaprb').checked=s.swaprb;$('motion').checked=s.motion;$('mmin').value=s.mmin;$('msens').value=s.msens;$('h24').checked=s.h24;$('auto').checked=s.auto;$('aint').value=s.aint;if(document.activeElement!==$('host'))$('host').value=s.host;$('hl').textContent=s.host;$('snd').checked=s.snd;$('vol').value=s.vol;$('vv').textContent=s.vol;$('rot').value=s.rot}
  $('st').textContent='v'+s.ver+' · WiFi '+(s.ssid||'?')+' · '+s.ip+' · '+s.rssi+' dBm · up '+Math.floor(s.up/60)+' min · '+s.fps.toFixed(1)+' fps'}
 async function send(){if(!$('mmin').value||!$('aint').value){$('amsg').textContent='enter a number in the sleep / auto feed boxes';return}
-busy=1;await fetch('/api/set?snd='+($('snd').checked?1:0)+'&vol='+$('vol').value+'&rot='+$('rot').value+'&motion='+($('motion').checked?1:0)+'&mmin='+$('mmin').value+'&msens='+$('msens').value+'&inv='+($('inv').checked?1:0)+'&swaprb='+($('swaprb').checked?1:0)+'&night='+($('night').checked?1:0)+($('nstart').value?'&nstart='+$('nstart').value:'')+($('nend').value?'&nend='+$('nend').value:'')+'&tz='+encodeURIComponent($('tz').value)+'&dfmt='+$('dfmt').value+'&h24='+($('h24').checked?1:0)+'&auto='+($('auto').checked?1:0)+'&aint='+$('aint').value,{method:'POST'});busy=0;dirty=0;$('amsg').textContent='Applied \u2713'}
+busy=1;await fetch('/api/set?snd='+($('snd').checked?1:0)+'&vol='+$('vol').value+'&rot='+$('rot').value+'&motion='+($('motion').checked?1:0)+'&mmin='+$('mmin').value+'&msens='+$('msens').value+'&inv='+($('inv').checked?1:0)+'&swaprb='+($('swaprb').checked?1:0)+'&night='+($('night').checked?1:0)+'&nstart='+getTime('nstart')+'&nend='+getTime('nend')+'&tz='+encodeURIComponent($('tz').value)+'&dfmt='+$('dfmt').value+'&h24='+($('h24').checked?1:0)+'&auto='+($('auto').checked?1:0)+'&aint='+$('aint').value,{method:'POST'});busy=0;dirty=0;$('amsg').textContent='Applied \u2713'}
 const mark=()=>{dirty=1;$('amsg').textContent='not applied yet'};
-['snd','h24','auto','aint','rot','motion','mmin','msens','inv','swaprb','tz','dfmt','night','nstart','nend'].forEach(i=>{$(i).onchange=mark;$(i).oninput=mark});$('vol').oninput=()=>{$('vv').textContent=$('vol').value;mark()};$('apply').onclick=send;
+['snd','h24','auto','aint','rot','motion','mmin','msens','inv','swaprb','tz','dfmt','night','nstart_h','nstart_m','nend_h','nend_m'].forEach(i=>{$(i).onchange=mark;$(i).oninput=mark});$('vol').oninput=()=>{$('vv').textContent=$('vol').value;mark()};$('apply').onclick=send;
 const CAUSE=['no motion','motion','touch','BOOT button','setting turned off','sensor offline'];
 async function mlog(){try{const a=await (await fetch('/api/motionlog')).json();
  $('mlog').innerHTML=a.length?a.map(e=>(e.e?'\u2600 woke':'\u263e slept')+' \u00b7 '+(e.w||'up '+Math.floor(e.up/60)+' min')+' \u00b7 '+CAUSE[e.c]).join('<br>'):'<small>No sleep/wake events yet.</small>'}catch(e){}}
