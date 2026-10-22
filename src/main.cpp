@@ -20,7 +20,7 @@
 #include "motion.h"
 #include "wifi_setup.h"
 
-#define FW_VERSION "1.6.1"
+#define FW_VERSION "1.6.2"
 
 TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite frame = TFT_eSprite(&tft);    // Freenove: the whole frame
@@ -633,8 +633,9 @@ static void logPreviousCrash() {
              (unsigned long)crumb.minHeap / 1024, crumb.wifi == WL_CONNECTED ? "up" : "DOWN", crumb.rssi, (unsigned long)crumb.maxLoop);
     String log = prefs.getString("rlog", "");
     log = String(line) + "\n" + log;
-    while (log.length() > 700) { int k = log.lastIndexOf('\n', log.length() - 2); if (k < 0) break; log = log.substring(0, k + 1); }
+    while (log.length() > 2400) { int k = log.lastIndexOf('\n', log.length() - 2); if (k < 0) break; log = log.substring(0, k + 1); }
     prefs.putString("rlog", log);
+    prefs.putUInt("ncrash", prefs.getUInt("ncrash", 0) + 1);
   }
   memset(&crumb, 0, sizeof(crumb));
   crumb.magic = CRUMB_MAGIC;
@@ -682,11 +683,11 @@ static bool ntpSynced() { return sntp_get_sync_status() == SNTP_SYNC_STATUS_COMP
 static String statusJson() {
   String ssid = WiFi.status() == WL_CONNECTED ? WiFi.SSID() : String("");
   ssid.replace("\\", ""); ssid.replace("\"", "");
-  char b[1100];
+  char b[1200];
   char tbuf[16], dbuf[24];
   clockStrings(tbuf, sizeof(tbuf), dbuf, sizeof(dbuf));
-  snprintf(b, sizeof(b), "{\"night\":%s,\"nstart\":\"%02d:%02d\",\"nend\":\"%02d:%02d\",\"isnight\":%s,\"rst\":\"%s\",\"timeset\":%s,\"ntp\":%s,\"tz\":\"%s\",\"dfmt\":%d,\"now\":\"%s  %s\",\"env\":\"" BOARD_ID "\",\"board\":\"%s\",\"inv\":%s,\"swaprb\":%s,\"motion\":%s,\"mmin\":%d,\"msens\":%d,\"mon\":%s,\"mready\":%s,\"mscore\":%.2f,\"asleep\":%s,\"h24\":%s,\"ssid\":\"%s\",\"snd\":%s,\"vol\":%d,\"rot\":%d,\"auto\":%s,\"aint\":%d,\"host\":\"%s\",\"ver\":\"" FW_VERSION "\",\"ip\":\"%s\",\"rssi\":%d,\"up\":%lu,\"fps\":%.1f}",
-           g_night ? "true" : "false", g_nstart / 60, g_nstart % 60, g_nend / 60, g_nend % 60, g_isNight ? "true" : "false",
+  snprintf(b, sizeof(b), "{\"crashes\":%u,\"night\":%s,\"nstart\":\"%02d:%02d\",\"nend\":\"%02d:%02d\",\"isnight\":%s,\"rst\":\"%s\",\"timeset\":%s,\"ntp\":%s,\"tz\":\"%s\",\"dfmt\":%d,\"now\":\"%s  %s\",\"env\":\"" BOARD_ID "\",\"board\":\"%s\",\"inv\":%s,\"swaprb\":%s,\"motion\":%s,\"mmin\":%d,\"msens\":%d,\"mon\":%s,\"mready\":%s,\"mscore\":%.2f,\"asleep\":%s,\"h24\":%s,\"ssid\":\"%s\",\"snd\":%s,\"vol\":%d,\"rot\":%d,\"auto\":%s,\"aint\":%d,\"host\":\"%s\",\"ver\":\"" FW_VERSION "\",\"ip\":\"%s\",\"rssi\":%d,\"up\":%lu,\"fps\":%.1f}",
+           (unsigned)prefs.getUInt("ncrash", 0), g_night ? "true" : "false", g_nstart / 60, g_nstart % 60, g_nend / 60, g_nend % 60, g_isNight ? "true" : "false",
            resetReasonShort(), timeIsSet() ? "true" : "false", ntpSynced() ? "true" : "false",
            g_tz.c_str(), g_datefmt, tbuf, dbuf,
 #ifdef BOARD_CYD28
@@ -820,6 +821,7 @@ static void setupWeb() {
     while (true) {}
   });
 #endif
+  server.on("/api/reboot", HTTP_ANY, []() { server.send(200, "text/plain", "rebooting"); restartAt = millis() + 500; });
   server.on("/api/mdbg", HTTP_ANY, []() {      // motion debug mode (see motion.cpp); toggle motion off/on to apply
     int v; if (numArg("mode", 0, 4, v)) g_motionDbg = v;
     server.send(200, "text/plain", String("motion debug mode ") + (int)g_motionDbg);
