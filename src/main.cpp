@@ -20,7 +20,7 @@
 #include "motion.h"
 #include "wifi_setup.h"
 
-#define FW_VERSION "1.5.3"
+#define FW_VERSION "1.6.0"
 
 TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite frame = TFT_eSprite(&tft);    // Freenove: the whole frame
@@ -533,6 +533,7 @@ button,.b{background:#2fb36b;color:#fff;text-decoration:none;border-radius:8px;p
 <div class="c"><button id="apply">Apply</button> <small id="amsg"></small><br><small>Applies sound, volume, rotation, colours, time zone, date format and the other settings above.</small></div>
 <div class="c"><b>Firmware update</b><br><small>Upload the <b>update</b> file for this board (not the factory file): it keeps your WiFi and settings.</small><br>
 <input type="file" id="fw" accept=".bin"><br><button id="fwb">Upload &amp; restart</button> <small id="fwmsg"></small></div>
+<div class="c"><b>Restart log</b> <small>(crashes and watchdog restarts, newest first)</small><div id="rlog" style="margin-top:6px;font-size:13px;white-space:pre-wrap;word-break:break-word"></div><button id="rlogclr">Clear</button></div>
 <div class="c"><b>System</b><br>
 <button id="wifi">Forget WiFi &amp; restart</button> <button id="recal" style="display:none">Recalibrate touch</button> <small id="sysmsg"></small></div>
 <div class="c"><label>Hostname <input id="host" maxlength="31" style="width:55%"></label>
@@ -563,6 +564,9 @@ const mark=()=>{dirty=1;$('amsg').textContent='not applied yet'};
 const CAUSE=['no motion','motion','touch','BOOT button','setting turned off','sensor offline'];
 async function mlog(){try{const a=await (await fetch('/api/motionlog')).json();
  $('mlog').innerHTML=a.length?a.map(e=>(e.e?'\u2600 woke':'\u263e slept')+' \u00b7 '+(e.w||'up '+Math.floor(e.up/60)+' min')+' \u00b7 '+CAUSE[e.c]).join('<br>'):'<small>No sleep/wake events yet.</small>'}catch(e){}}
+async function rlog(){try{const t=await (await fetch('/api/resetlog')).text();$('rlog').textContent=t.trim()||'None recorded.'}catch(e){}}
+$('rlogclr').onclick=async()=>{await fetch('/api/resetlog?clear=1');rlog()};
+rlog();
 $('mclr').onclick=async()=>{await fetch('/api/motionlog/clear',{method:'POST'});mlog()};
 mlog();setInterval(mlog,5000);
 async function shot(){const r=await fetch('/api/frame',{cache:'no-store'});const W=+r.headers.get('X-W')||480,H=+r.headers.get('X-H')||320;const b=new Uint8Array(await r.arrayBuffer());
@@ -594,13 +598,71 @@ load();setInterval(load,5000);
 </script></main></body></html>)HTML";
 
 
+// ---- restart diagnostics: a breadcrumb in RTC memory survives watchdog / crash resets; at boot it is turned into a
+// line of the (persistent) restart log, shown on the web page and at /api/resetlog.
+#define CRUMB_MAGIC 0xF15C7A11u
+enum Stage : uint8_t { ST_START, ST_NET, ST_BUTTON, ST_TOUCH, ST_SLEEP, ST_WORLD, ST_RENDER, ST_PUSH, ST_IDLE };
+static const char *stageName[] = {"start", "network", "button", "touch", "sleep/night", "world", "render", "display push", "idle"};
+struct Crumb { uint32_t magic, up, epoch, heap, minHeap, maxLoop; uint8_t stage, wifi; int8_t rssi; };
+RTC_NOINIT_ATTR static Crumb crumb;
+#define STAGE(x) (crumb.stage = (x))
+
+static const char *resetKind(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_PANIC: return "CRASH (panic)";
+    case ESP_RST_INT_WDT: return "interrupt watchdog";
+    case ESP_RST_TASK_WDT: return "task watchdog";
+    case ESP_RST_WDT: return "watchdog";
+    case ESP_RST_BROWNOUT: return "brownout";
+    default: return nullptr;
+  }
+}
+
+static void logPreviousCrash() {
+  esp_reset_reason_t r = esp_reset_reason();
+  const char *kind = resetKind(r);
+  if (kind && crumb.magic == CRUMB_MAGIC) {
+    char when[32] = "time unknown";
+    if (crumb.epoch > 1700000000UL) {
+      time_t e = crumb.epoch; struct tm t; localtime_r(&e, &t);
+      strftime(when, sizeof(when), "%a %m/%d %I:%M %p", &t);
+    }
+    char line[200];
+    snprintf(line, sizeof(line), "%s | %s | in %s | up %lu s | heap %lu KB (min %lu) | wifi %s rssi %d | slowest loop %lu ms",
+             when, kind, crumb.stage < 9 ? stageName[crumb.stage] : "?", (unsigned long)crumb.up, (unsigned long)crumb.heap / 1024,
+             (unsigned long)crumb.minHeap / 1024, crumb.wifi == WL_CONNECTED ? "up" : "DOWN", crumb.rssi, (unsigned long)crumb.maxLoop);
+    String log = prefs.getString("rlog", "");
+    log = String(line) + "\n" + log;
+    while (log.length() > 700) { int k = log.lastIndexOf('\n', log.length() - 2); if (k < 0) break; log = log.substring(0, k + 1); }
+    prefs.putString("rlog", log);
+  }
+  memset(&crumb, 0, sizeof(crumb));
+  crumb.magic = CRUMB_MAGIC;
+}
+
+static void updateCrumb(uint32_t loopMs) {
+  static uint32_t last = 0, worst = 0;
+  if (loopMs > worst) worst = loopMs;
+  uint32_t now = millis();
+  if (now - last < 1000) return;
+  last = now;
+  crumb.up = now / 1000;
+  time_t e = time(nullptr); crumb.epoch = e > 1700000000 ? (uint32_t)e : 0;
+  crumb.heap = ESP.getFreeHeap(); crumb.minHeap = ESP.getMinFreeHeap();
+  crumb.wifi = (uint8_t)WiFi.status(); crumb.rssi = (int8_t)WiFi.RSSI();
+  if (worst > crumb.maxLoop) crumb.maxLoop = worst;
+  worst = 0;
+}
+
 static const char *resetReasonShort() {
   switch (esp_reset_reason()) {
     case ESP_RST_POWERON: return "power-on";
     case ESP_RST_EXT: return "reset button";
     case ESP_RST_SW: return "restart";
     case ESP_RST_PANIC: return "CRASH";
-    case ESP_RST_INT_WDT: case ESP_RST_TASK_WDT: case ESP_RST_WDT: return "watchdog";
+    case ESP_RST_INT_WDT: return "interrupt watchdog";
+    case ESP_RST_TASK_WDT: return "task watchdog";
+    case ESP_RST_WDT: return "watchdog";
     case ESP_RST_BROWNOUT: return "brownout";
     default: return "other";
   }
@@ -748,6 +810,19 @@ static void setupWeb() {
     if (e < 1700000000UL || e > 4000000000UL) { server.send(400, "application/json", "{\"error\":\"bad time\"}"); return; }
     setClockEpoch(e);
     server.send(200, "application/json", statusJson());
+  });
+#ifdef CRASH_TEST
+  server.on("/api/crashtest", HTTP_ANY, []() {      // debug builds only: proves the restart log works
+    server.send(200, "text/plain", "crashing");
+    delay(200);
+    STAGE(ST_RENDER);
+    portDISABLE_INTERRUPTS();
+    while (true) {}
+  });
+#endif
+  server.on("/api/resetlog", HTTP_ANY, []() {
+    if (server.hasArg("clear")) prefs.putString("rlog", "");
+    server.send(200, "text/plain", prefs.getString("rlog", ""));
   });
   server.on("/api/chest", HTTP_ANY, []() {
     if (chestState == CHEST_CLOSED) { chestState = CHEST_OPENING; chestT = 0; }
@@ -906,6 +981,7 @@ void setup() {
   setenv("TZ", g_tz.c_str(), 1); tzset();
   { uint32_t lt = prefs.getUInt("lastt", 0);                    // restore the last saved time (no battery clock)
     if (lt > 1700000000UL) { struct timeval tv = {(time_t)lt + 5, 0}; settimeofday(&tv, nullptr); } }
+  logPreviousCrash();
   if (g_rot != 1 && g_rot != 3) g_rot = DEFAULT_ROT;
   pinMode(0, INPUT_PULLUP);        // BOOT button
   halAudioStart();                 // before the touch controller: the Freenove shares I2C with its codec
@@ -948,6 +1024,7 @@ void loop() {
   static uint32_t last = millis(), lastTouch = 0, fpsT = millis();
   static int frames = 0;
   uint32_t now = millis();
+  STAGE(ST_NET);
   float dt = (now - last) / 1000.0f; last = now;
   if (dt > 0.1f) dt = 0.1f;
   float t = now / 1000.0f;
@@ -962,8 +1039,9 @@ void loop() {
   static uint32_t lastSave = 0;
   static bool savedAfterNtp = false;
   if (!savedAfterNtp && ntpSynced()) { savedAfterNtp = true; saveTimeNow(); }
-  if (now - lastSave > 30UL * 60000UL) { lastSave = now; saveTimeNow(); }
+  if (now - lastSave > 6UL * 3600000UL) { lastSave = now; saveTimeNow(); }
 
+  STAGE(ST_BUTTON);
   static bool lastBtn = true;
   bool btn = digitalRead(0);
   if (!btn && lastBtn) {
@@ -972,6 +1050,7 @@ void loop() {
   }
   lastBtn = btn;
 
+  STAGE(ST_TOUCH);
   int px, py;
   bool touched = halTouch(px, py);
   if (touched) lastActivity = now;
@@ -986,25 +1065,32 @@ void loop() {
     }
   }
 
+  STAGE(ST_SLEEP);
   updateNight(now);
   updateSleep();
-  if (g_asleep || g_isNight) { delay(40); return; }       // screen off: no rendering
+  if (g_asleep || g_isNight) { STAGE(ST_IDLE); updateCrumb(millis() - now); delay(40); return; }
+  STAGE(ST_WORLD);       // screen off: no rendering
 
   updateWorld(dt, t, now);
   curT = t; curNow = now;
 
 #ifdef BOARD_FREENOVE_S3
+  STAGE(ST_RENDER);
   cv.s = &frame; cv.oy = 0;
   memcpy(frame.getPointer(), bg.getPointer(), PANEL_W * PANEL_H * 2);
   drawScene(t, now);
+  STAGE(ST_PUSH);
   frame.pushSprite(0, 0);
 #else
   for (int i = 0; i < PANEL_H / STRIP_H; i++) {
+    STAGE(ST_RENDER);
     renderStrip(i);
+    STAGE(ST_PUSH);
     strip.pushSprite(0, i * STRIP_H);
   }
 #endif
 
+  updateCrumb(millis() - now);
   frames++;
   if (now - fpsT >= 5000) {
     g_fps = frames * 1000.0f / (now - fpsT);
