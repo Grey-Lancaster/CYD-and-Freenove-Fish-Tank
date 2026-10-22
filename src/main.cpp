@@ -20,7 +20,7 @@
 #include "motion.h"
 #include "wifi_setup.h"
 
-#define FW_VERSION "1.6.0"
+#define FW_VERSION "1.6.1"
 
 TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite frame = TFT_eSprite(&tft);    // Freenove: the whole frame
@@ -820,6 +820,10 @@ static void setupWeb() {
     while (true) {}
   });
 #endif
+  server.on("/api/mdbg", HTTP_ANY, []() {      // motion debug mode (see motion.cpp); toggle motion off/on to apply
+    int v; if (numArg("mode", 0, 4, v)) g_motionDbg = v;
+    server.send(200, "text/plain", String("motion debug mode ") + (int)g_motionDbg);
+  });
   server.on("/api/resetlog", HTTP_ANY, []() {
     if (server.hasArg("clear")) prefs.putString("rlog", "");
     server.send(200, "text/plain", prefs.getString("rlog", ""));

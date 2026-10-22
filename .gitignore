@@ -5,3 +5,5 @@ __pycache__/
 f2_*.png
 build_task.log
 dist/
+restart_watch.log
+motion_experiment.log

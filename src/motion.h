@@ -12,6 +12,7 @@ void motionLogEvent(bool sleep, uint8_t cause);
 void motionLogClear();
 String motionLogJson();
 
+extern volatile int g_motionDbg;
 extern bool g_motion;        // sensing enabled (screen sleeps when nobody is around)
 extern int g_mmin;           // minutes without motion before the screen sleeps
 extern int g_msens;          // 1 (least) .. 10 (most) sensitive

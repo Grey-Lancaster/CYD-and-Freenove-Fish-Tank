@@ -15,6 +15,10 @@
 #define WIN 40            // samples in the variance window
 #define EVAL_MS 250
 #define PING_MS 25
+
+// Debug modes (set via /api/mdbg while hunting the interrupt-watchdog restarts; toggle motion off/on to apply):
+// 0 normal, 1 no pings (CSI only), 2 pings only (CSI off), 3 modem sleep left on, 4 pings at 10 Hz
+volatile int g_motionDbg = 0;
 #define HITS_ON 4         // consecutive over-threshold evaluations to start motion
 #define HITS_OFF 3        // consecutive quiet evaluations to end it
 
@@ -122,16 +126,16 @@ static void motionTask(void *) {
           cfg.manu_scale = false;
           esp_wifi_set_csi_config(&cfg);
           esp_wifi_set_csi_rx_cb(csiCb, nullptr);
-          if (esp_wifi_set_csi(true) == ESP_OK) {
+          if (g_motionDbg == 2 || esp_wifi_set_csi(true) == ESP_OK) {
             csiOn = true;
-            WiFi.setSleep(false);  // modem sleep delays replies
+            if (g_motionDbg != 3) WiFi.setSleep(false);  // modem sleep delays replies
             Serial.println("Motion: CSI on");
           } else {
             Serial.println("Motion: CSI not available in this build");
           }
         }
       } else {
-        esp_wifi_set_csi(false);
+        if (g_motionDbg != 2) esp_wifi_set_csi(false);
         csiOn = false;
         s_ready = false;
         s_readyAt = 0;
@@ -147,7 +151,7 @@ static void motionTask(void *) {
       continue;
     }
 
-    if (now - lastPing >= PING_MS) {
+    if (g_motionDbg != 1 && now - lastPing >= (g_motionDbg == 4 ? 100u : (uint32_t)PING_MS)) {
       lastPing = now;
       if (sock < 0) sock = openIcmp();
       if (sock >= 0) {
