@@ -11,3 +11,10 @@ for h in fishtank fishtank28 cydfishtank; do
   rl=$(curl -s -m 8 http://$ip/api/resetlog)
   [ -n "$rl" ] && echo "$rl" | sed "s/^/    RESTART-LOG[$h]: /" >> $LOG
 done
+
+# PhotoFrame on the 4in Freenove (different firmware: its status uses "up" and "reset")
+ip=$(getent hosts photoframe4.local | awk '{print $1}' | head -1)
+if [ -n "$ip" ]; then
+  st=$(curl -s -m 8 http://$ip/api/status)
+  echo "$(date '+%F %T') photoframe4 ($ip) v$(echo "$st" | grep -o '"v":"[^"]*"' | cut -d'"' -f4) up=$(echo "$st" | grep -o '"up":[0-9]*' | cut -d: -f2)s reset=$(echo "$st" | grep -o '"reset":"[^"]*"' | cut -d'"' -f4)" >> $LOG
+fi

@@ -20,7 +20,7 @@
 #include "motion.h"
 #include "wifi_setup.h"
 
-#define FW_VERSION "1.6.3"
+#define FW_VERSION "1.6.4"
 
 TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite frame = TFT_eSprite(&tft);    // Freenove: the whole frame
@@ -485,6 +485,7 @@ static bool nightWake(uint32_t now) {
 
 static const char PAGE[] PROGMEM = R"HTML(<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Fish Tank</title>
+<link rel="icon" href="/favicon.ico">
 <style>body{margin:0;font:16px system-ui,sans-serif;background:#0b2a45;color:#e8f4ff}
 main{max-width:460px;margin:0 auto;padding:16px}h1{margin:.2em 0}
 .c{background:#12466f;border-radius:12px;padding:14px;margin:12px 0}
@@ -719,11 +720,18 @@ static bool numArg(const char *name, int lo, int hi, int &out) {
   return true;
 }
 
+extern const uint8_t favicon_start[] asm("_binary_src_favicon_ico_start");
+extern const uint8_t favicon_end[] asm("_binary_src_favicon_ico_end");
+
 static void setupWeb() {
   server.on("/", HTTP_GET, []() {
     String p = FPSTR(PAGE);
     p.replace("@L@", String(ROT_LEFT)); p.replace("@R@", String(ROT_RIGHT));
     server.send(200, "text/html", p);
+  });
+  server.on("/favicon.ico", HTTP_GET, []() {
+    server.sendHeader("Cache-Control", "max-age=86400");
+    server.send_P(200, "image/x-icon", (PGM_P)favicon_start, favicon_end - favicon_start);
   });
   server.on("/api/status", HTTP_GET, []() {
     server.sendHeader("Access-Control-Allow-Origin", "*");      // lets the page find the board under a new hostname
