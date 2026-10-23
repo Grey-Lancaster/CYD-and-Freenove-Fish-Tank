@@ -12,9 +12,9 @@
 #include "lwip/sockets.h"
 #include "motion.h"
 
-#define WIN 40            // samples in the variance window
+#define WIN 20            // samples in the variance window (about 2 s at 10 pings per second)
 #define EVAL_MS 250
-#define PING_MS 25
+#define PING_MS 100       // 10 pings/s. 40/s (25 ms) with CSI on and modem sleep off triggered interrupt-watchdog restarts on the Freenove S3 boards
 
 // Debug modes (set via /api/mdbg while hunting the interrupt-watchdog restarts; toggle motion off/on to apply):
 // 0 normal, 1 no pings (CSI only), 2 pings only (CSI off), 3 modem sleep left on, 4 pings at 10 Hz
