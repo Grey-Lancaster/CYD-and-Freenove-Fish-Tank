@@ -29,7 +29,7 @@
         <h2>About</h2>
       </div>
       <p class="step-help">An animated fake aquarium for the Freenove FNK0104S and the CYD 2.8&quot;: a blue tang, clownfish, angelfish, goldfish and a school of neon tetras swim around a tank with rising bubbles, swaying kelp and drifting light rays. Tap the screen to drop fish food &mdash; the fish swim over and eat it (with a sonar ring and a ding ding). Looping bubble sound through the speaker, plus a clock and date in the corner.</p>
-      <p class="step-help">Version <strong>v1.6.5</strong>. <strong>WiFi is set up on the screen</strong> the first time it starts (pick your network, type the password). After that, open <code>http://fishtank.local</code> (CYD: <code>http://cydfishtank.local</code>) for settings &mdash; sound, volume, rotation, invert colours, swap red/blue, auto feed, 12/24-hour time, hostname, screenshots and WiFi motion sleep. BOOT shows the IP and status; BOOT during WiFi setup runs the tank offline. The CYD asks you to touch five crosshairs once to calibrate the touch screen.</p>
+      <p class="step-help">Version <strong>v1.6.6</strong>. <strong>WiFi is set up on the screen</strong> the first time it starts (pick your network, type the password). After that, open <code>http://fishtank.local</code> (CYD: <code>http://cydfishtank.local</code>) for settings &mdash; sound, volume, rotation, invert colours, swap red/blue, auto feed, 12/24-hour time, hostname, screenshots and WiFi motion sleep. BOOT shows the IP and status; BOOT during WiFi setup runs the tank offline. The CYD asks you to touch five crosshairs once to calibrate the touch screen.</p>
       <p class="step-help"><strong>Updating without losing WiFi:</strong> download the <code>Fish-Tank-&lt;your board&gt;-update.bin</code> file from the <a href="https://github.com/Grey-Lancaster/CYD-and-Freenove-Fish-Tank/releases/latest" target="_blank" rel="noopener">latest release</a>, open the tank&#39;s web page (<code>http://fishtank.local</code> or <code>http://cydfishtank.local</code>), and use <em>Firmware update</em>. A treasure chest opens now and then and fills the tank with bubbles, and the clock has a time zone, date format and 12/24-hour setting (and can take its time from your phone or PC if the board is offline). Night mode turns the screen and sound off between two times, and motion sleep dims the screen when nobody is around.</p>
       <p class="step-help">Source, design files and build notes: <a href="https://github.com/Grey-Lancaster/CYD-and-Freenove-Fish-Tank" target="_blank" rel="noopener">CYD-and-Freenove-Fish-Tank</a>.</p>
     </section>
@@ -42,10 +42,10 @@
       <p class="step-help">This replaces whatever was on the board before. Pick the one that matches your board. The two CYD builds differ only in the display driver. <strong>This installer wipes the board, including its saved WiFi.</strong> To update a tank that is already set up, use the <em>update</em> file instead (see below) &mdash; it keeps WiFi and settings.</p>
 
       <select id="chapterSelect" class="chapter-select">
-        <option value="freenove4" data-bin="firmware/aquarium.bin" selected>Freenove 4.0&quot; FNK0104S (ESP32-S3, 480&times;320) &mdash; v1.6.5</option>
-        <option value="freenove28" data-bin="firmware/aquarium-freenove28.bin">Freenove 2.8&quot; FNK0104B (ESP32-S3, 320&times;240) &mdash; v1.6.5</option>
-        <option value="cyd28" data-bin="firmware/aquarium-cyd28.bin">CYD 2.8&quot; (ILI9341, 1 USB port) &mdash; v1.6.5</option>
-        <option value="cyd28usb2" data-bin="firmware/aquarium-cyd28-2usb.bin">CYD 2.8&quot; 2-USB (ST7789, 2 USB ports) &mdash; v1.6.5</option>
+        <option value="freenove4" data-bin="firmware/aquarium.bin" selected>Freenove 4.0&quot; FNK0104S (ESP32-S3, 480&times;320) &mdash; v1.6.6</option>
+        <option value="freenove28" data-bin="firmware/aquarium-freenove28.bin">Freenove 2.8&quot; FNK0104B (ESP32-S3, 320&times;240) &mdash; v1.6.6</option>
+        <option value="cyd28" data-bin="firmware/aquarium-cyd28.bin">CYD 2.8&quot; (ILI9341, 1 USB port) &mdash; v1.6.6</option>
+        <option value="cyd28usb2" data-bin="firmware/aquarium-cyd28-2usb.bin">CYD 2.8&quot; 2-USB (ST7789, 2 USB ports) &mdash; v1.6.6</option>
       </select>
       <p class="step-help" style="margin-top:8px">CYD colours wrong (negative, or red and blue swapped)? You most likely picked the wrong CYD build &mdash; try the other one. Nothing is damaged.</p>
       <p id="chapterStatus" class="step-help" style="margin-top: 10px; margin-bottom: 0;"></p>
