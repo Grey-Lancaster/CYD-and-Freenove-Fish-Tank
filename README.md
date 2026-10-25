@@ -28,7 +28,7 @@ Four builds, one codebase: **Freenove FNK0104S 4.0"** (`pio run -e freenove4`), 
 - Tap-to-feed (sonar ring + ding ding), auto feed, looping bubble sound, clock + date (12/24 h), BOOT info screen.
 - **WiFi is set up on the screen** with [TouchWifiProvisioner](https://github.com/Grey-Lancaster/TouchWifiProvisioner) (no credentials in the firmware). BOOT during setup = run offline.
 - Web settings page at `http://fishtank.local` (CYD: `cydfishtank.local`): sound, volume, rotation, **invert colours**, **swap red/blue**, auto feed, 12/24 h, hostname, screenshots, forget WiFi, recalibrate touch (CYD), WiFi **motion sleep** (ported from CYD PhotoFrame).
-- **Firmware update page** on the tank's web page (upload `Fish-Tank-<build>-update.bin`; keeps WiFi and settings). The factory `.bin` (and the web installer) wipe the board including saved WiFi.
+- **Firmware update page** at `/update` ([ElegantOTA](https://github.com/ayushsharma82/ElegantOTA), linked from the tank's web page; choose `Fish-Tank-<build>-update.bin`; keeps WiFi and settings). The factory `.bin` (and the web installer) wipe the board including saved WiFi.
 - **Night mode**: screen and sound off between two times (hour/minute dropdowns); touch or BOOT lights it for a minute. Works with motion sleep (night wins).
 - **Date & time card**: time zone, date format (5 styles), 12/24 h, and "Set time from this device" for boards without internet; the last time is saved and restored after a restart.
 - **Treasure chest** that opens every so often and fills the tank with bubbles (button on the web page).

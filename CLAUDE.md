@@ -24,6 +24,7 @@ Wrong colours on a CYD almost always means the wrong env (driver), not the inver
 ## Gotchas
 - Merged flash images must be DIO mode (byte 2 of the file is `0x02`); the N16R8 octal PSRAM needs it. Use `esptool merge_bin` with `--flash_mode dio` (command is in the README).
 - Building one env cleans the other's `.pio` dir. Rebuild the env you intend to flash/OTA right before doing it.
+- Web firmware update is ElegantOTA at `/update` (sync `WebServer`; pinned to the same commit as CYD-PhotoFrame; `ElegantOTA.loop()` runs in `loop()`). Don't also register your own `/update` route.
 - OTA: `espota.py -i <ip-or-hostname> -p 3232 -f .pio/build/<env>/firmware.bin -r`. Hostnames: `fishtank`, `fishtank28`, `cydfishtank`. WiFi OTA can fail intermittently; retry.
 - Releases: tag `vX.Y.Z`, title `Fish Tank vX.Y.Z`, attach factory + update bins for every env. Ask before publishing.
 

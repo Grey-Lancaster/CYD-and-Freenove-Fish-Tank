@@ -10,7 +10,7 @@
 #include <ESPmDNS.h>
 #include <Preferences.h>
 #include <time.h>
-#include <Update.h>
+#include <ElegantOTA.h>
 #include <sys/time.h>
 #include "esp_sntp.h"
 #include "board.h"
@@ -20,7 +20,7 @@
 #include "motion.h"
 #include "wifi_setup.h"
 
-#define FW_VERSION "1.6.5"
+#define FW_VERSION "1.6.6"
 
 TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite frame = TFT_eSprite(&tft);    // Freenove: the whole frame
@@ -532,8 +532,8 @@ button,.b{background:#2fb36b;color:#fff;text-decoration:none;border-radius:8px;p
 <div id="mlog" style="margin-top:8px;font-size:14px"></div>
 <button id="mclr">Clear log</button></div>
 <div class="c"><button id="apply">Apply</button> <small id="amsg"></small><br><small>Applies sound, volume, rotation, colours, time zone, date format and the other settings above.</small></div>
-<div class="c"><b>Firmware update</b><br><small>Upload the <b>update</b> file for this board (not the factory file): it keeps your WiFi and settings.</small><br>
-<input type="file" id="fw" accept=".bin"><br><button id="fwb">Upload &amp; restart</button> <small id="fwmsg"></small></div>
+<div class="c"><b>Firmware update</b><br><small>Open the update page and choose the <b>update</b> file for this board (<b id="envname"></b>; not the factory file): it keeps your WiFi and settings.</small><br>
+<a href="/update"><button type="button">Open update page</button></a></div>
 <div class="c"><b>Restart log</b> <small>(crashes and watchdog restarts, newest first)</small><div id="rlog" style="margin-top:6px;font-size:13px;white-space:pre-wrap;word-break:break-word"></div><button id="rlogclr">Clear</button></div>
 <div class="c"><b>System</b><br>
 <button id="wifi">Forget WiFi &amp; restart</button> <button id="recal" style="display:none">Recalibrate touch</button> <small id="sysmsg"></small></div>
@@ -552,7 +552,7 @@ function getTime(id){return $(id+'_h').value+':'+String($(id+'_m').value).padSta
 fillTime('nstart');fillTime('nend');
 async function load(){const s=await (await fetch('/api/status')).json();
  $('mlive').textContent=s.motion?(s.mready?'motion score '+s.mscore+(s.mon?' \u25cf moving':' (quiet)')+(s.asleep?' \u00b7 screen asleep':''):'sensor warming up\u2026'):'';
-window.envId=s.env;$('recal').style.display=s.board=='cyd'?'inline-block':'none';
+window.envId=s.env;$('envname').textContent=s.env;$('recal').style.display=s.board=='cyd'?'inline-block':'none';
 $('now').textContent=s.now+(s.ntp?'  (internet time)':'');
 if(!s.ntp&&!window.timeSent){window.timeSent=1;fetch('/api/settime?epoch='+Math.floor(Date.now()/1000),{method:'POST'})}
 $('nstat').textContent=s.isnight?'(it is night now: screen off)':'';
@@ -579,12 +579,6 @@ $('shot').onclick=shot;
 $('live').onchange=()=>{clearInterval(window.lv);if($('live').checked){shot();window.lv=setInterval(shot,2500)}};
 $('wifi').onclick=async()=>{if(!confirm('Forget all saved WiFi networks and restart? You will set up WiFi again on the screen.'))return;await fetch('/api/wifi/forget',{method:'POST'});$('sysmsg').textContent='Restarting\u2026'};
 $('recal').onclick=async()=>{if(!confirm('Restart and calibrate the touch screen again?'))return;await fetch('/api/recal',{method:'POST'});$('sysmsg').textContent='Restarting\u2026'};
-$('fwb').onclick=()=>{const f=$('fw').files[0];if(!f){$('fwmsg').textContent='choose a file first';return}
- if(!f.name.includes(window.envId)&&!confirm('This file name does not contain "'+window.envId+'", so it may be for a different board. Continue anyway?'))return;
- const x=new XMLHttpRequest(),fd=new FormData();fd.append('fw',f,f.name);x.open('POST','/update');
- x.upload.onprogress=e=>$('fwmsg').textContent=Math.round(e.loaded*100/e.total)+'%';
- x.onload=()=>{$('fwmsg').textContent=x.status==200?'Done. Restarting\u2026 reload this page in a few seconds.':'Update failed ('+x.responseText+')'};
- x.onerror=()=>$('fwmsg').textContent='connection lost (it may be restarting)';x.send(fd)};
 $('settime').onclick=async()=>{await fetch('/api/settime?epoch='+Math.floor(Date.now()/1000),{method:'POST'});$('tmsg').textContent='time set \u2713';load()};
 $('chest').onclick=()=>fetch('/api/chest',{method:'POST'});
 $('feed').onclick=()=>fetch('/api/feed',{method:'POST'});
@@ -803,17 +797,6 @@ static void setupWeb() {
     feedAt(50 + random(VW - 100), 16, 5);
     server.send(200, "application/json", "{\"ok\":true}");
   });
-  server.on("/update", HTTP_POST, []() {
-    bool ok = !Update.hasError();
-    server.send(ok ? 200 : 500, "text/plain", ok ? "OK" : Update.errorString());
-    if (ok) restartAt = millis() + 1000;
-  }, []() {
-    HTTPUpload &up = server.upload();
-    if (up.status == UPLOAD_FILE_START) Update.begin(UPDATE_SIZE_UNKNOWN);
-    else if (up.status == UPLOAD_FILE_WRITE) Update.write(up.buf, up.currentSize);
-    else if (up.status == UPLOAD_FILE_END) Update.end(true);
-    else if (up.status == UPLOAD_FILE_ABORTED) Update.abort();
-  });
   server.on("/api/settime", HTTP_ANY, []() {
     uint32_t e = (uint32_t)server.arg("epoch").toInt();
     if (e < 1700000000UL || e > 4000000000UL) { server.send(400, "application/json", "{\"error\":\"bad time\"}"); return; }
@@ -851,6 +834,21 @@ static void setupWeb() {
     server.send(200, "application/json", "{\"ok\":true}");
     delay(300);
     halRecalibrateTouch();
+  });
+  // Firmware update page at /update (ElegantOTA, the same one CYD-PhotoFrame uses). The upload is handled inside
+  // server.handleClient(), so the tank is paused while it runs; progress is drawn on the screen as well.
+#ifdef OTA_PASS
+  ElegantOTA.begin(&server, "admin", OTA_PASS);   // same password as ArduinoOTA; user name is "admin"
+#else
+  ElegantOTA.begin(&server);
+#endif
+  ElegantOTA.onStart([]() { tft.fillScreen(TFT_BLACK); tft.setTextColor(TFT_WHITE); tft.drawString("Firmware update...", 10, 10, 4); });
+  ElegantOTA.onProgress([](size_t cur, size_t total) {
+    static uint32_t lastDraw = 0;
+    if (!total || (millis() - lastDraw < 150 && cur < total)) return;   // each repaint costs SPI time, so throttle
+    lastDraw = millis();
+    tft.fillRect(10, 60, PANEL_W - 20, 20, TFT_DARKGREY);
+    tft.fillRect(10, 60, (int)((PANEL_W - 20) * (float)cur / total), 20, TFT_GREEN);
   });
   server.begin();
 }
@@ -1046,6 +1044,7 @@ void loop() {
   if (g_online) {
     ArduinoOTA.handle();
     server.handleClient();
+    ElegantOTA.loop();
     static uint32_t lastWifi = 0;
     if (WiFi.status() != WL_CONNECTED && now - lastWifi > 30000) { lastWifi = now; WiFi.reconnect(); }
   }
