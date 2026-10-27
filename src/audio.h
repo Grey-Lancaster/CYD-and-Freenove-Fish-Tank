@@ -3,3 +3,4 @@
 #include <Arduino.h>
 void audioMix(int16_t *out, int n);     // n mono samples at 16 kHz
 void audioDing();                       // start the feed sound
+void audioCash();                       // cash register sound (the diver appears)

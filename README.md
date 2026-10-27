@@ -32,6 +32,7 @@ Four builds, one codebase: **Freenove FNK0104S 4.0"** (`pio run -e freenove4`), 
 - **Night mode**: screen and sound off between two times (hour/minute dropdowns); touch or BOOT lights it for a minute. Works with motion sleep (night wins).
 - **Date & time card**: time zone, date format (5 styles), 12/24 h, and "Set time from this device" for boards without internet; the last time is saved and restored after a restart.
 - **Treasure chest** that opens every so often and fills the tank with bubbles (button on the web page).
+- **Scuba diver**: every sixth time the chest opens he swims in from one side, takes a bag of gold (the chest goes empty), and swims out the other, with a cash-register "k-ching" as he goes. Tap the chest on the screen to open it; "Send the diver" on the web page calls him right away.
 - OTA updates: `espota.py -i <ip> -p 3232 -f .pio/build/<env>/firmware.bin -r` (hostname = the board's hostname).
 
 ## Rendering

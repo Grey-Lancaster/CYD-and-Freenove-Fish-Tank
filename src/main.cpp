@@ -20,7 +20,7 @@
 #include "motion.h"
 #include "wifi_setup.h"
 
-#define FW_VERSION "1.6.6"
+#define FW_VERSION "1.7.0"
 
 TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite frame = TFT_eSprite(&tft);    // Freenove: the whole frame
@@ -106,6 +106,34 @@ ChestState chestState = CHEST_CLOSED;
 float chestT = 0, chestNextOpen = 8, chestBubbleT = 0;
 struct ChestBubble { float x, y, v, r, ph; bool on; };
 ChestBubble cbub[14];
+// Every sixth time the chest opens, a scuba diver swims in from one side, takes a bag of gold from it and leaves by the other side.
+struct Diver { float t; bool on; bool right; };
+Diver diver = {0, false, false};
+int chestOpens = 0;
+bool chestLooted = false;      // the diver has taken the gold; refilled once the chest closes
+#define DIVER_IN 5.0f      // swim in to the chest
+#define DIVER_GRAB 1.2f    // hover and take the bag (bag appears at DIVER_BAG)
+#define DIVER_BAG (DIVER_IN + 0.7f)
+#define DIVER_OUT 7.0f     // swim off the far side
+#define DIVER_DUR (DIVER_IN + DIVER_GRAB + DIVER_OUT)
+static void diverPos(float t, float &x, float &y) {
+  const float dir = diver.right ? 1.0f : -1.0f;            // direction he travels: enters one side, leaves the other
+  const float cx = CHEST_X, cy = CHEST_BASE - 34;
+  const float ex = diver.right ? -40.0f : VW + 40.0f, xe = diver.right ? VW + 50.0f : -50.0f;
+  if (t < DIVER_IN) {
+    float s = t / DIVER_IN;
+    x = ex + (cx - ex) * s;
+    y = cy - 80 * (1 - s) * (1 - s) + 5 * sinf(s * 8.0f) * (1 - s);
+  } else if (t < DIVER_IN + DIVER_GRAB) {
+    float u = (t - DIVER_IN) / DIVER_GRAB;
+    x = cx + dir * 8 * u;
+    y = cy + 2 * sinf(u * 6.2832f);
+  } else {
+    float s = (t - DIVER_IN - DIVER_GRAB) / DIVER_OUT, x0 = cx + dir * 8;
+    x = x0 + (xe - x0) * s;
+    y = cy - (cy + 50) * s * s + 12 * sinf(s * 8.0f) * min(1.0f, s * 5.0f);
+  }
+}
 static float chestOpenness() {      // 0 closed .. 1 fully open
   switch (chestState) {
     case CHEST_OPENING: return min(1.0f, chestT / 1.0f);
@@ -353,18 +381,40 @@ static void updateChest(float dt) {
   chestT += dt;
   switch (chestState) {
     case CHEST_CLOSED:  if (chestT >= chestNextOpen) { chestState = CHEST_OPENING; chestT = 0; } break;
-    case CHEST_OPENING: if (chestT >= 1.0f) { chestState = CHEST_OPEN; chestT = 0; chestBubbleT = 0; } break;
+    case CHEST_OPENING:
+      if (chestT >= 1.0f) {
+        chestState = CHEST_OPEN; chestT = 0; chestBubbleT = 0;
+        if (++chestOpens % 6 == 0 && !diver.on) {
+          static bool nextRight = false;
+          diver = {0, true, nextRight}; nextRight = !nextRight; audioCash();
+        }
+      }
+      break;
     case CHEST_OPEN:
       chestBubbleT += dt;
       while (chestBubbleT > 0.11f) {
         chestBubbleT -= 0.11f;
         for (auto &b : cbub) if (!b.on) { b = {CHEST_X + (float)random(-14, 15), (float)(CHEST_BASE - 24), 45.0f + random(40), 2.0f + random(4), (float)random(628) / 100.0f, true}; break; }
       }
-      if (chestT >= 4.5f) { chestState = CHEST_CLOSING; chestT = 0; }
+      if (chestT >= 4.5f && !(diver.on && diver.t < DIVER_IN + DIVER_GRAB + 1.5f)) { chestState = CHEST_CLOSING; chestT = 0; }
       break;
-    case CHEST_CLOSING: if (chestT >= 1.0f) { chestState = CHEST_CLOSED; chestT = 0; chestNextOpen = 12 + random(10); } break;
+    case CHEST_CLOSING: if (chestT >= 1.0f) { chestState = CHEST_CLOSED; chestT = 0; chestLooted = false; chestNextOpen = 12 + random(10); } break;
   }
   for (auto &b : cbub) if (b.on) { b.y -= b.v * dt; if (b.y < -6) b.on = false; }
+  if (diver.on) {
+    float dx, dy;
+    float before = fmodf(diver.t, 0.35f);
+    float tPrev = diver.t;
+    diver.t += dt;
+    if (tPrev < DIVER_BAG && diver.t >= DIVER_BAG) chestLooted = true;
+    if (floorf(diver.t / 2.5f) > floorf(tPrev / 2.5f))
+      audioCash();                               // rings as he starts swimming in, and keeps ringing all the way out
+    if (diver.t >= DIVER_DUR) diver.on = false;
+    else if (before + dt >= 0.35f) {             // breath bubbles from the regulator
+      diverPos(diver.t, dx, dy);
+      for (auto &b : cbub) if (!b.on) { b = {dx - 6, dy - 6, 40.0f + random(30), 1.5f + random(3), (float)random(628) / 100.0f, true}; break; }
+    }
+  }
 }
 
 static void updateWorld(float dt, float t, uint32_t now) {
@@ -499,7 +549,7 @@ button,.b{background:#2fb36b;color:#fff;text-decoration:none;border-radius:8px;p
 <label>Invert colours <input type="checkbox" id="inv"></label>
 <label>Swap red and blue <input type="checkbox" id="swaprb"></label>
 <small>Use these if the colours look wrong (like a photo negative, or red and blue swapped).</small></div>
-<div class="c"><button id="feed">Feed the fish</button> <button id="chest">Open the treasure chest</button>
+<div class="c"><button id="feed">Feed the fish</button> <button id="chest">Open the treasure chest</button> <button id="diver">Send the diver</button>
 <label style="margin-top:14px">Auto feed <input type="checkbox" id="auto"></label>
 <label>Every (seconds) <input type="number" id="aint" min="5" max="3600" style="width:90px"></label></div>
 <div class="c"><b>Date &amp; time</b> <small id="now"></small>
@@ -581,6 +631,7 @@ $('wifi').onclick=async()=>{if(!confirm('Forget all saved WiFi networks and rest
 $('recal').onclick=async()=>{if(!confirm('Restart and calibrate the touch screen again?'))return;await fetch('/api/recal',{method:'POST'});$('sysmsg').textContent='Restarting\u2026'};
 $('settime').onclick=async()=>{await fetch('/api/settime?epoch='+Math.floor(Date.now()/1000),{method:'POST'});$('tmsg').textContent='time set \u2713';load()};
 $('chest').onclick=()=>fetch('/api/chest',{method:'POST'});
+$('diver').onclick=()=>fetch('/api/diver',{method:'POST'});
 $('feed').onclick=()=>fetch('/api/feed',{method:'POST'});
 $('hsave').onclick=async()=>{const h=$('host').value.trim().toLowerCase();
  const r=await fetch('/api/host?host='+encodeURIComponent(h),{method:'POST'});
@@ -821,6 +872,14 @@ static void setupWeb() {
     if (server.hasArg("clear")) prefs.putString("rlog", "");
     server.send(200, "text/plain", prefs.getString("rlog", ""));
   });
+  server.on("/api/diver", HTTP_ANY, []() {         // send the diver out right now (opens the chest too)
+    static bool nextRight = true;
+    if (!diver.on) {
+      diver = {0, true, nextRight}; nextRight = !nextRight; audioCash();
+      if (chestState == CHEST_CLOSED) { chestState = CHEST_OPENING; chestT = 0; }
+    }
+    server.send(200, "text/plain", "ok");
+  });
   server.on("/api/chest", HTTP_ANY, []() {
     if (chestState == CHEST_CLOSED) { chestState = CHEST_OPENING; chestT = 0; }
     server.send(200, "application/json", "{\"ok\":true}");
@@ -921,13 +980,61 @@ static void drawChest() {
   // dark opening with a gold glow while open
   if (p > 0.05f) {
     cv.fillEllipse(x, top + 1, 25, 7 * p + 1, RGB(25, 12, 5));
-    cv.fillEllipse(x, top, 17 * p, 4 * p + 1, RGB(255, 214, 95));
-    cv.fillEllipse(x - 6, top - 1, 4 * p + 1, 2 * p + 1, goldL);
-    cv.fillEllipse(x + 7, top, 4 * p + 1, 2 * p + 1, goldL);
+    if (!chestLooted) {
+      cv.fillEllipse(x, top, 17 * p, 4 * p + 1, RGB(255, 214, 95));
+      cv.fillEllipse(x - 6, top - 1, 4 * p + 1, 2 * p + 1, goldL);
+      cv.fillEllipse(x + 7, top, 4 * p + 1, 2 * p + 1, goldL);
+    }
   }
   // lock
   cv.fillRect(x - 4, top + 7, 8, 8, gold);
   cv.fillRect(x - 1, top + 10, 2, 3, woodD);
+}
+
+static void drawDiver(float t) {
+  if (!diver.on) return;
+  float x, y, x2, y2;
+  diverPos(diver.t, x, y);
+  diverPos(diver.t + 0.1f, x2, y2);
+  float dx = x2 - x, dy = y2 - y, l = sqrtf(dx * dx + dy * dy);
+  if (l < 0.001f) return;
+  dx /= l; dy /= l;
+  const float nx = diver.right ? dy : -dy, ny = diver.right ? -dx : dx;   // toward the diver's back (up, whichever way he swims)
+  auto P = [&](float u, float v, float &ox, float &oy) { ox = x + dx * u + nx * v; oy = y + dy * u + ny * v; };
+  const uint16_t suit = RGB(25, 40, 70), suitL = RGB(50, 80, 125), tank = RGB(225, 190, 60), skin = RGB(240, 200, 160);
+  const uint16_t fin = RGB(235, 120, 30), mask = RGB(150, 215, 245), bagC = RGB(150, 100, 45);
+  float ax, ay, bx, by, kick = sinf(t * 7.0f) * 5.0f;
+  // flippers (behind the legs)
+  P(-16, 0, ax, ay);
+  P(-27, 3 + kick, bx, by);  cv.drawWideLine(ax, ay, bx, by, 5, fin, fin);
+  P(-27, -3 - kick, bx, by); cv.drawWideLine(ax, ay, bx, by, 5, fin, fin);
+  // air tank on the back
+  P(-2, 6, ax, ay); P(7, 6, bx, by);
+  cv.drawWideLine(ax, ay, bx, by, 5, tank, tank);
+  // torso + legs
+  P(-17, 0, ax, ay); P(6, 0, bx, by);
+  cv.drawWideLine(ax, ay, bx, by, 7, suit, suit);
+  P(-2, 3, ax, ay); P(5, 3, bx, by);
+  cv.drawWideLine(ax, ay, bx, by, 2, suitL, suitL);
+  // head with mask
+  float hx, hy;
+  P(10, 0, hx, hy);
+  cv.fillCircle(hx, hy, 5, skin);
+  P(12, -1, ax, ay);
+  cv.fillCircle(ax, ay, 3, mask);
+  P(10, -4, ax, ay);
+  cv.drawLine(hx, hy, ax, ay, suit);
+  // arm holding the gold bag out front and below
+  float ax2, ay2;
+  P(4, -3, ax, ay); P(11, -9, ax2, ay2);
+  cv.drawWideLine(ax, ay, ax2, ay2, 3, suit, suit);
+  if (diver.t < DIVER_BAG) return;                // empty-handed until he takes the bag
+  float gx = ax2 + 2 * sinf(t * 4.0f), gy = ay2 + 7 + 2 * cosf(t * 4.0f);
+  cv.fillCircle(gx, gy, 9, bagC);
+  cv.fillTriangle(gx - 5, gy - 6, gx + 5, gy - 6, gx, gy - 13, bagC);
+  cv.fillCircle(gx, gy, 7.5f, RGB(240, 196, 70));
+  cv.fillCircle(gx - 2, gy - 2, 3, RGB(255, 228, 120));
+  cv.fillRect(gx - 5, gy - 7, 10, 2, RGB(232, 188, 62));
 }
 
 static void drawScene(float t, uint32_t now) {
@@ -941,6 +1048,7 @@ static void drawScene(float t, uint32_t now) {
     }
   }
   drawChest();
+  drawDiver(t);
   for (int i = 0; i < NFISH; i++) {
     Fish &f = fishes[i];
     float wag = sinf(t * 9.0f + f.ph) * 4.0f;
@@ -1074,7 +1182,10 @@ void loop() {
     } else if (g_asleep) {
       wakeScreen(2);                  // the first touch only wakes the screen
     } else {
-      feedAt(px / cv.sx, max(py / cv.sy, 14.0f), 3);
+      float wx = px / cv.sx, wy = max(py / cv.sy, 14.0f);
+      if (fabsf(wx - CHEST_X) < 36 && wy > CHEST_BASE - 48 && wy < CHEST_BASE + 10) {
+        if (chestState == CHEST_CLOSED) { chestState = CHEST_OPENING; chestT = 0; }   // tap the chest to open it
+      } else feedAt(wx, wy, 3);
     }
   }
 
