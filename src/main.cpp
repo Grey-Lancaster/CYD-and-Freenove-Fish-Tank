@@ -472,7 +472,7 @@ static void applyBacklight() { halBacklight(!(g_asleep || g_isNight)); }
 static void wakeScreen(uint8_t cause) {
   if (!g_asleep) return;
   g_asleep = false;
-  motionLogEvent(false, cause);
+  motionLogEvent(false, cause | (g_isNight ? 0x80 : 0));      // 0x80: night mode, the screen stays dark regardless
   applyBacklight();
   lastActivity = millis();
 }
@@ -500,7 +500,7 @@ static void updateSleep() {
     g_asleep = true;
     sleepAt = now;
     motionRebaseline();
-    motionLogEvent(true, 0);
+    motionLogEvent(true, g_isNight ? 0x80 : 0);
     applyBacklight();
   }
 }
@@ -614,7 +614,7 @@ const mark=()=>{dirty=1;$('amsg').textContent='not applied yet'};
 ['snd','h24','auto','aint','rot','motion','mmin','msens','inv','swaprb','tz','dfmt','night','nstart_h','nstart_m','nend_h','nend_m'].forEach(i=>{$(i).onchange=mark;$(i).oninput=mark});$('vol').oninput=()=>{$('vv').textContent=$('vol').value;mark()};$('msens').oninput=()=>{$('msv').textContent=$('msens').value;mark()};$('apply').onclick=send;
 const CAUSE=['no motion','motion','touch','BOOT button','setting turned off','sensor offline'];
 async function mlog(){try{const a=await (await fetch('/api/motionlog')).json();
- $('mlog').innerHTML=a.length?a.map(e=>(e.e?'\u2600 woke':'\u263e slept')+' \u00b7 '+(e.w||'up '+Math.floor(e.up/60)+' min')+' \u00b7 '+CAUSE[e.c]).join('<br>'):'<small>No sleep/wake events yet.</small>'}catch(e){}}
+ $('mlog').innerHTML=a.length?a.map(e=>((e.c&128)?(e.e?'\u25cb motion seen':'\u25cb quiet'):(e.e?'\u2600 woke':'\u263e slept'))+' \u00b7 '+(e.w||'up '+Math.floor(e.up/60)+' min')+' \u00b7 '+CAUSE[e.c&127]+((e.c&128)?' \u00b7 night mode, screen stays dark':'')).join('<br>'):'<small>No sleep/wake events yet.</small>'}catch(e){}}
 async function rlog(){try{const t=await (await fetch('/api/resetlog')).text();$('rlog').textContent=t.trim()||'None recorded.'}catch(e){}}
 $('rlogclr').onclick=async()=>{await fetch('/api/resetlog?clear=1');rlog()};
 rlog();
