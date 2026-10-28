@@ -64,8 +64,9 @@ bool halTouch(int &x, int &y) {
 void halRecalibrateTouch() {}
 
 void halApplySound() {
-  digitalWrite(AP_ENABLE, g_snd ? LOW : HIGH);          // LOW = amp on (as in the Freenove demos)
-  if (g_es_handle) es8311_voice_mute(g_es_handle, !g_snd);
+  const bool en = g_snd || audioAlarmOn();              // the alarm sounds even with the tank muted
+  digitalWrite(AP_ENABLE, en ? LOW : HIGH);             // LOW = amp on (as in the Freenove demos)
+  if (g_es_handle) es8311_voice_mute(g_es_handle, !en);
 }
 
 static void audioTask(void *) {

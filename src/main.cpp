@@ -43,6 +43,20 @@ volatile bool g_isNight = false;   // inside the night window: screen and sound 
 bool g_night = false;          // night mode enabled
 int g_nstart = 22 * 60;        // minutes after midnight the screen turns off
 int g_nend = 7 * 60;           // minutes after midnight it turns back on
+
+// ---- alarm clock
+bool g_alOn = false;
+int g_alMin = 7 * 60;          // minutes after midnight
+int g_alDays = 0x7F;           // bit 0 = Sunday .. bit 6 = Saturday
+int g_alSnz = 9;               // snooze, minutes
+int g_alVol = 70;              // alarm loudness 0..100, separate from the tank volume
+enum AlState { AL_IDLE, AL_RAMP, AL_RING, AL_SNOOZE };
+AlState alState = AL_IDLE;
+uint32_t alT0 = 0, alRampLen = 60000, alSnoozeUntil = 0;
+int alFiredDay = -1;           // day of the year it last started, so it rings once a day
+bool alMissed = false, alPanel = false;
+uint32_t alPanelAt = 0;
+static inline bool alActive() { return alState == AL_RAMP || alState == AL_RING; }
 static uint32_t nightWakeUntil = 0;   // a touch / BOOT lights the screen for a minute at night
 static uint32_t lastActivity = 0;
 bool g_invert = false;         // flip the panel's colour inversion
@@ -69,6 +83,7 @@ static void saveSettings() {
   prefs.putBool("invert", g_invert); prefs.putBool("swaprb", g_swaprb);
   prefs.putBool("motion", g_motion); prefs.putInt("mmin", g_mmin); prefs.putInt("msens", g_msens);
   prefs.putBool("night", g_night); prefs.putInt("nstart", g_nstart); prefs.putInt("nend", g_nend);
+  prefs.putBool("alon", g_alOn); prefs.putInt("almin", g_alMin); prefs.putInt("aldays", g_alDays); prefs.putInt("alsnz", g_alSnz); prefs.putInt("alvol", g_alVol);
 }
 
 // ---------------------------------------------------------------- fish
@@ -355,6 +370,13 @@ static void drawClock() {
   cv.setTextColor(RGB(235, 245, 255));
   cv.drawString(buf, VW - 10, TIME_Y, 4);
   if (date[0]) cv.drawString(date, VW - 10, DATE_Y, 2);
+  if (g_alOn) {                                   // little bell: an alarm is set
+    const float bx = VW - 10 - cv.s->textWidth(buf, 4) / cv.sx - 16, by = TIME_Y + 13;
+    const uint16_t gold = RGB(240, 200, 60);
+    cv.fillEllipse(bx, by, 6, 7, gold);
+    cv.fillRect(bx - 8, by + 4, 16, 3, gold);
+    cv.fillCircle(bx, by + 10, 2, gold);
+  }
 }
 
 // ------------------------------------------------------------- behaviour
@@ -429,6 +451,12 @@ static void updateWorld(float dt, float t, uint32_t now) {
   for (auto &r : rings) if (r.on) { r.age += dt; if (r.age > 1.5f) r.on = false; }
   for (int i = 0; i < NFISH; i++) {
     Fish &f = fishes[i];
+    if (alActive()) {                             // alarm: swim up as the sun rises, then circle the clock
+      const float a = t * 0.5f + i * 6.2832f / NFISH;
+      if (alState == AL_RING) { f.tx = VW / 2 + 165 * cosf(a); f.ty = 150 + 85 * sinf(a); }
+      else f.ty = f.yMin;
+      f.nextPick = now + 1000;
+    }
     float tx = f.tx, ty = f.ty;
     int target = -1; float best = 1e9;
     for (int k = 0; k < 16; k++) {
@@ -440,7 +468,7 @@ static void updateWorld(float dt, float t, uint32_t now) {
     if (target >= 0) {
       tx = food[target].x; ty = food[target].y; spd *= 2.2f;
       if (fabsf(tx - f.x) < 14 && fabsf(ty - f.y) < 12) food[target].on = false;   // eaten
-    } else if (now > f.nextPick || (fabsf(tx - f.x) < 8 && fabsf(ty - f.y) < 6)) {
+    } else if (!alActive() && (now > f.nextPick || (fabsf(tx - f.x) < 8 && fabsf(ty - f.y) < 6))) {
       pickTarget(f, now); tx = f.tx; ty = f.ty;
     }
     float dx = tx - f.x, dy = ty - f.y;
@@ -503,6 +531,48 @@ static void updateSleep() {
     motionLogEvent(true, g_isNight ? 0x80 : 0);
     applyBacklight();
   }
+}
+
+// ---------------------------------------------------------------- alarm clock
+// A minute before the set time the tank brightens like a sunrise (silently); at the time the fish
+// circle a big clock and the chime plays, getting louder until Stop or Snooze (touch, or the BOOT button). It lights the
+// screen even in night mode / motion sleep, and sounds even with the tank muted.
+static void alSetSound(int lvl) {
+  const bool was = audioAlarmOn();
+  audioAlarm(lvl);
+  if (was != (lvl > 0)) halApplySound();
+}
+static void alStop() { alState = AL_IDLE; alSetSound(0); }
+static void alSnooze(uint32_t now) { alState = AL_SNOOZE; alSnoozeUntil = now + (uint32_t)g_alSnz * 60000UL; alSetSound(0); }
+static void alTest(uint32_t now) { alRampLen = 8000; alT0 = now; alState = AL_RAMP; alMissed = false; }
+static float alProgress(uint32_t now) { return alState == AL_RAMP ? min(1.0f, (now - alT0) / (float)alRampLen) : 1.0f; }
+
+static void updateAlarm(uint32_t now) {
+  static uint32_t last = 0;
+  if (now - last < 250) return;
+  last = now;
+  if (alState == AL_IDLE && g_alOn && !alPanel) {                 // not while the set panel is open: wait for Done
+    struct tm tm;
+    if (getLocalTime(&tm, 0) && ((g_alDays >> tm.tm_wday) & 1) && alFiredDay != tm.tm_yday) {
+      const int d = g_alMin * 60 - (tm.tm_hour * 3600 + tm.tm_min * 60 + tm.tm_sec);   // seconds until the alarm
+      if (d <= 60 && d > -120) {
+        alFiredDay = tm.tm_yday; alRampLen = 60000; alMissed = false;
+        alT0 = now - (d > 0 ? (uint32_t)(60 - d) * 1000UL : 60000UL);
+        alState = AL_RAMP;
+      }
+    }
+  }
+  if (alState == AL_RAMP && now - alT0 >= alRampLen) { alState = AL_RING; alT0 = now; }
+  else if (alState == AL_SNOOZE && now >= alSnoozeUntil) { alState = AL_RING; alT0 = now; }
+  else if (alState == AL_RING && now - alT0 > 600000UL) { alStop(); alMissed = true; }   // nobody came: give up after 10 min
+  if (alActive()) {
+    const float e = min(1.0f, (now - alT0) / 30000.0f);
+    alSetSound(alState == AL_RAMP ? 0 : (int)(g_alVol * (0.6f + 0.4f * e)));      // silent sunrise lead-in; the chime starts at the set time
+    nightWakeUntil = now + 5000; lastActivity = now;
+    if (g_isNight) { g_isNight = false; applyBacklight(); }
+    if (g_asleep) wakeScreen(6);
+  }
+  if (alPanel && now - alPanelAt > 30000) { alPanel = false; saveSettings(); }
 }
 
 // ---- night mode: screen and sound off between two times of day (local time; needs the clock to be set)
@@ -569,6 +639,14 @@ button,.b{background:#2fb36b;color:#fff;text-decoration:none;border-radius:8px;p
 <small id="shm"> (the tank pauses for a second while it copies)</small>
 <canvas id="cv" width="480" height="320" style="display:none;width:100%;margin-top:10px;border-radius:8px"></canvas>
 <a id="dl" style="display:none" class="b">Download PNG</a></div>
+<div class="c"><b>Alarm clock</b> <small id="alstat"></small>
+<label>Alarm on <input type="checkbox" id="alon"></label>
+<label>Wake at <span><select id="al_h"></select> : <select id="al_m"></select></span></label>
+<div id="aldays" style="margin:6px 0"></div>
+<label>Snooze (minutes) <input type="number" id="alsnz" min="1" max="30" style="width:90px"></label>
+<label>Alarm loudness <input type="range" id="alvol" min="1" max="100"><span id="alvv"></span></label>
+<button id="altest">Test alarm</button> <button id="alstop">Stop alarm</button>
+<small>A minute before, the tank silently brightens like a sunrise; at the set time the chime starts and the fish circle a big clock. You can also tap the time on the tank to set it. The alarm sounds even if the tank is muted.</small></div>
 <div class="c"><b>Night mode</b> <small id="nstat"></small>
 <label>Screen and sound off at night <input type="checkbox" id="night"></label>
 <label>Off from <span><select id="nstart_h"></select> : <select id="nstart_m"></select></span></label>
@@ -599,20 +677,22 @@ function setTime(id,v){fillTime(id);const p=(v||'0:0').split(':'),h=+p[0],mm=+p[
  if(![...mi.options].some(o=>+o.value==mm)){const vals=[...mi.options].map(o=>+o.value);vals.push(mm);vals.sort((a,b)=>a-b);mi.innerHTML='';vals.forEach(x=>mi.add(new Option(String(x).padStart(2,'0'),x)))}
  $(id+'_h').value=h;mi.value=mm}
 function getTime(id){return $(id+'_h').value+':'+String($(id+'_m').value).padStart(2,'0')}
-fillTime('nstart');fillTime('nend');
+fillTime('nstart');fillTime('nend');fillTime('al');
+$('aldays').innerHTML=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((n,i)=>'<label style="display:inline;margin-right:8px"><input type=checkbox id=ad'+i+'> '+n+'</label>').join('');
 async function load(){const s=await (await fetch('/api/status')).json();
  $('mlive').textContent=s.motion?(s.mready?'motion score '+s.mscore+(s.mon?' \u25cf moving':' (quiet)')+(s.asleep?' \u00b7 screen asleep':''):'sensor warming up\u2026'):'';
 window.envId=s.env;$('envname').textContent=s.env;$('recal').style.display=s.board=='cyd'?'inline-block':'none';
 $('now').textContent=s.now+(s.ntp?'  (internet time)':'');
 if(!s.ntp&&!window.timeSent){window.timeSent=1;fetch('/api/settime?epoch='+Math.floor(Date.now()/1000),{method:'POST'})}
 $('nstat').textContent=s.isnight?'(it is night now: screen off)':'';
-if(!busy&&!dirty){$('night').checked=s.night;setTime('nstart',s.nstart);setTime('nend',s.nend);$('tz').value=s.tz;$('dfmt').value=s.dfmt;$('inv').checked=s.inv;$('swaprb').checked=s.swaprb;$('motion').checked=s.motion;$('mmin').value=s.mmin;$('msens').value=s.msens;$('msv').textContent=s.msens;$('h24').checked=s.h24;$('auto').checked=s.auto;$('aint').value=s.aint;if(document.activeElement!==$('host'))$('host').value=s.host;$('hl').textContent=s.host;$('snd').checked=s.snd;$('vol').value=s.vol;$('vv').textContent=s.vol;$('rot').value=s.rot}
+if(!busy&&!dirty){$('alon').checked=s.alon;setTime('al',s.atime);for(let i=0;i<7;i++)$('ad'+i).checked=!!((s.adays>>i)&1);$('alsnz').value=s.asnz;$('alvol').value=s.avol;$('alvv').textContent=s.avol;$('night').checked=s.night;setTime('nstart',s.nstart);setTime('nend',s.nend);$('tz').value=s.tz;$('dfmt').value=s.dfmt;$('inv').checked=s.inv;$('swaprb').checked=s.swaprb;$('motion').checked=s.motion;$('mmin').value=s.mmin;$('msens').value=s.msens;$('msv').textContent=s.msens;$('h24').checked=s.h24;$('auto').checked=s.auto;$('aint').value=s.aint;if(document.activeElement!==$('host'))$('host').value=s.host;$('hl').textContent=s.host;$('snd').checked=s.snd;$('vol').value=s.vol;$('vv').textContent=s.vol;$('rot').value=s.rot}
+ $('alstat').textContent=['','sunrise starting\u2026','RINGING','snoozed'][s.alstate]||(s.almiss?'last alarm was not stopped':'');
  $('st').textContent='v'+s.ver+' · WiFi '+(s.ssid||'?')+' · '+s.ip+' · '+s.rssi+' dBm · up '+Math.floor(s.up/60)+' min (last restart: '+s.rst+') · '+s.fps.toFixed(1)+' fps'}
 async function send(){if(!$('mmin').value||!$('aint').value){$('amsg').textContent='enter a number in the sleep / auto feed boxes';return}
-busy=1;await fetch('/api/set?snd='+($('snd').checked?1:0)+'&vol='+$('vol').value+'&rot='+$('rot').value+'&motion='+($('motion').checked?1:0)+'&mmin='+$('mmin').value+'&msens='+$('msens').value+'&inv='+($('inv').checked?1:0)+'&swaprb='+($('swaprb').checked?1:0)+'&night='+($('night').checked?1:0)+'&nstart='+getTime('nstart')+'&nend='+getTime('nend')+'&tz='+encodeURIComponent($('tz').value)+'&dfmt='+$('dfmt').value+'&h24='+($('h24').checked?1:0)+'&auto='+($('auto').checked?1:0)+'&aint='+$('aint').value,{method:'POST'});busy=0;dirty=0;$('amsg').textContent='Applied \u2713'}
+busy=1;await fetch('/api/set?snd='+($('snd').checked?1:0)+'&vol='+$('vol').value+'&rot='+$('rot').value+'&motion='+($('motion').checked?1:0)+'&mmin='+$('mmin').value+'&msens='+$('msens').value+'&inv='+($('inv').checked?1:0)+'&swaprb='+($('swaprb').checked?1:0)+'&night='+($('night').checked?1:0)+'&nstart='+getTime('nstart')+'&nend='+getTime('nend')+'&tz='+encodeURIComponent($('tz').value)+'&dfmt='+$('dfmt').value+'&h24='+($('h24').checked?1:0)+'&auto='+($('auto').checked?1:0)+'&aint='+$('aint').value+'&alon='+($('alon').checked?1:0)+'&atime='+getTime('al')+'&adays='+[0,1,2,3,4,5,6].reduce((a,i)=>a+($('ad'+i).checked?1<<i:0),0)+'&asnz='+$('alsnz').value+'&avol='+$('alvol').value,{method:'POST'});busy=0;dirty=0;$('amsg').textContent='Applied \u2713'}
 const mark=()=>{dirty=1;$('amsg').textContent='not applied yet'};
-['snd','h24','auto','aint','rot','motion','mmin','msens','inv','swaprb','tz','dfmt','night','nstart_h','nstart_m','nend_h','nend_m'].forEach(i=>{$(i).onchange=mark;$(i).oninput=mark});$('vol').oninput=()=>{$('vv').textContent=$('vol').value;mark()};$('msens').oninput=()=>{$('msv').textContent=$('msens').value;mark()};$('apply').onclick=send;
-const CAUSE=['no motion','motion','touch','BOOT button','setting turned off','sensor offline'];
+['alon','al_h','al_m','ad0','ad1','ad2','ad3','ad4','ad5','ad6','alsnz','alvol','snd','h24','auto','aint','rot','motion','mmin','msens','inv','swaprb','tz','dfmt','night','nstart_h','nstart_m','nend_h','nend_m'].forEach(i=>{$(i).onchange=mark;$(i).oninput=mark});$('vol').oninput=()=>{$('vv').textContent=$('vol').value;mark()};$('msens').oninput=()=>{$('msv').textContent=$('msens').value;mark()};$('apply').onclick=send;$('alvol').oninput=()=>{$('alvv').textContent=$('alvol').value;mark()};$('altest').onclick=()=>fetch('/api/alarm?cmd=test',{method:'POST'});$('alstop').onclick=()=>fetch('/api/alarm?cmd=stop',{method:'POST'});
+const CAUSE=['no motion','motion','touch','BOOT button','setting turned off','sensor offline','alarm'];
 async function mlog(){try{const a=await (await fetch('/api/motionlog')).json();
  $('mlog').innerHTML=a.length?a.map(e=>((e.c&128)?(e.e?'\u25cb motion seen':'\u25cb quiet'):(e.e?'\u2600 woke':'\u263e slept'))+' \u00b7 '+(e.w||'up '+Math.floor(e.up/60)+' min')+' \u00b7 '+CAUSE[e.c&127]+((e.c&128)?' \u00b7 night mode, screen stays dark':'')).join('<br>'):'<small>No sleep/wake events yet.</small>'}catch(e){}}
 async function rlog(){try{const t=await (await fetch('/api/resetlog')).text();$('rlog').textContent=t.trim()||'None recorded.'}catch(e){}}
@@ -744,7 +824,12 @@ static String statusJson() {
            g_invert ? "true" : "false", g_swaprb ? "true" : "false",
            g_motion ? "true" : "false", g_mmin, g_msens, motionDetected() ? "true" : "false", motionReady() ? "true" : "false", motionScore(), g_asleep ? "true" : "false",
            g_h24 ? "true" : "false", ssid.c_str(), g_snd ? "true" : "false", (int)g_vol, g_rot, g_auto ? "true" : "false", g_aint, g_host.c_str(), WiFi.localIP().toString().c_str(), WiFi.RSSI(), millis() / 1000UL, g_fps);
-  return String(b);
+  String o(b);
+  o.remove(o.length() - 1);
+  char a[160];
+  snprintf(a, sizeof(a), ",\"alon\":%s,\"atime\":\"%02d:%02d\",\"adays\":%d,\"asnz\":%d,\"avol\":%d,\"alstate\":%d,\"almiss\":%s}",
+           g_alOn ? "true" : "false", g_alMin / 60, g_alMin % 60, g_alDays, g_alSnz, g_alVol, (int)alState, alMissed ? "true" : "false");
+  return o + a;
 }
 
 static void drawScene(float t, uint32_t now);
@@ -803,6 +888,12 @@ static void setupWeb() {
     if (numArg("aint", 5, 3600, v)) g_aint = v;
     if (numArg("dfmt", 0, 4, v)) g_datefmt = v;
     if (numArg("night", 0, 1, v)) g_night = v != 0;
+    if (numArg("alon", 0, 1, v)) { g_alOn = v != 0; alFiredDay = -1; }
+    if (numArg("adays", 0, 127, v)) g_alDays = v;
+    if (numArg("asnz", 1, 30, v)) g_alSnz = v;
+    if (numArg("avol", 1, 100, v)) g_alVol = v;
+    { String s = server.arg("atime"); s.trim(); int c = s.indexOf(':');
+      if (c > 0) { int h = s.substring(0, c).toInt(), mi = s.substring(c + 1).toInt(); if (h >= 0 && h < 24 && mi >= 0 && mi < 60) { g_alMin = h * 60 + mi; alFiredDay = -1; } } }
     for (int k = 0; k < 2; k++) {
       String s = server.arg(k ? "nend" : "nstart"); s.trim();
       int c = s.indexOf(':');
@@ -871,6 +962,11 @@ static void setupWeb() {
   server.on("/api/resetlog", HTTP_ANY, []() {
     if (server.hasArg("clear")) prefs.putString("rlog", "");
     server.send(200, "text/plain", prefs.getString("rlog", ""));
+  });
+  server.on("/api/alarm", HTTP_ANY, []() {         // cmd=test (8 s sunrise, then ringing) or cmd=stop
+    String c = server.arg("cmd");
+    if (c == "test") alTest(millis()); else if (c == "stop") alStop();
+    server.send(200, "text/plain", "ok");
   });
   server.on("/api/diver", HTTP_ANY, []() {         // send the diver out right now (opens the chest too)
     static bool nextRight = true;
@@ -1037,6 +1133,147 @@ static void drawDiver(float t) {
   cv.fillRect(gx - 5, gy - 7, 10, 2, RGB(232, 188, 62));
 }
 
+// ---------------------------------------------------------------- alarm clock drawing
+static void seg7(float x, float y, float h, int d, uint16_t c) {       // one 7-segment digit, top-left x,y
+  static const uint8_t M[10] = {0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F};
+  const float w = h * 0.55f, t = h * 0.13f, hh = h / 2, v = hh - 1.5f * t;
+  const uint8_t m = M[d];
+  if (m & 1)  cv.fillRect(x + t, y, w - 2 * t, t, c);
+  if (m & 2)  cv.fillRect(x + w - t, y + t, t, v, c);
+  if (m & 4)  cv.fillRect(x + w - t, y + hh + t / 2, t, v, c);
+  if (m & 8)  cv.fillRect(x + t, y + h - t, w - 2 * t, t, c);
+  if (m & 16) cv.fillRect(x, y + hh + t / 2, t, v, c);
+  if (m & 32) cv.fillRect(x, y + t, t, v, c);
+  if (m & 64) cv.fillRect(x + t, y + hh - t / 2, w - 2 * t, t, c);
+}
+static void digitsGeom(float cx, float h, float &x0, float &hC, float &mC) {
+  const float w = h * 0.55f, gap = h * 0.18f, cw = h * 0.22f, W = 4 * w + cw + 4 * gap;
+  x0 = cx - W / 2;
+  hC = x0 + (2 * w + gap) / 2;
+  mC = x0 + 2 * w + gap + gap + cw + gap + (2 * w + gap) / 2;
+}
+static void drawDigits(float cx, float y, float h, int hh, int mm, bool lead, bool colon, uint16_t c) {
+  float x0, hC, mC;
+  digitsGeom(cx, h, x0, hC, mC);
+  const float w = h * 0.55f, gap = h * 0.18f, cw = h * 0.22f;
+  float x = x0;
+  if (lead || hh >= 10) seg7(x, y, h, hh / 10, c);
+  x += w + gap; seg7(x, y, h, hh % 10, c);
+  x += w + gap;
+  if (colon) { const float s = h * 0.12f; cv.fillRect(x + (cw - s) / 2, y + h * 0.3f, s, s, c); cv.fillRect(x + (cw - s) / 2, y + h * 0.65f, s, s, c); }
+  x += cw + gap; seg7(x, y, h, mm / 10, c);
+  x += w + gap; seg7(x, y, h, mm % 10, c);
+}
+
+// Warm sunrise wash over the whole scene, stronger at the top.
+static void alarmTint(float amt) {
+  uint16_t *px = (uint16_t *)cv.s->getPointer();
+  const int w = cv.s->width(), hgt = cv.s->height();
+  for (int y = 0; y < hgt; y++) {
+    const float wy = (y + cv.oy) / cv.sy;
+    const int k = (int)(amt * 200.0f * (1.0f - 0.5f * wy / VH));
+    if (k <= 0) continue;
+    uint16_t *row = px + (size_t)y * w;
+    for (int x = 0; x < w; x++) {
+      const uint16_t v = bswap16(row[x]);
+      int r = v >> 11, g = (v >> 5) & 63, b = v & 31;
+      r += ((31 - r) * k) >> 8; g += ((50 - g) * k) >> 8; b += ((12 - b) * k) >> 8;
+      row[x] = bswap16((r << 11) | (g << 5) | b);
+    }
+  }
+}
+
+#define BTN_SNZ_X 60
+#define BTN_STOP_X 250
+#define BTN_Y 232
+#define BTN_W 170
+#define BTN_H 58
+
+static void drawAlarmScreen(float t, uint32_t now) {
+  const float p = alProgress(now);
+  const float pulse = alState == AL_RING ? 0.5f + 0.5f * sinf(t * 4.0f) : 0;
+  alarmTint(min(1.0f, (0.3f + 0.7f * p) * (1.0f + 0.12f * pulse)));
+  if (alState != AL_RING) { drawClock(); return; }       // the sunrise lead-in is just the glow; the big clock and buttons come with the sound
+  char buf[16], date[24];
+  clockStrings(buf, sizeof(buf), date, sizeof(date));
+  const int h12 = atoi(buf);
+  const char *col = strchr(buf, ':');
+  const int mm = col ? atoi(col + 1) : 0;
+  const char *ap = col ? strchr(col, ' ') : nullptr;
+  const bool colon = (now / 500) % 2 == 0;
+  drawDigits(VW / 2 + 2, 82, 78, h12, mm, g_h24, true, RGB(120, 60, 10));
+  drawDigits(VW / 2, 80, 78, h12, mm, g_h24, colon, RGB(255, 244, 205));
+  cv.setTextDatum(TC_DATUM);
+  if (ap) { cv.setTextColor(RGB(255, 244, 205)); cv.drawString(ap + 1, VW / 2, 166, 4); }
+  if (alState == AL_RING) { cv.setTextColor(RGB(255, 255, 255)); cv.drawString("Time to get up!", VW / 2, 28, 4); }
+  cv.fillRoundRect(BTN_SNZ_X, BTN_Y, BTN_W, BTN_H, 12, RGB(40, 90, 150));
+  cv.fillRoundRect(BTN_STOP_X, BTN_Y, BTN_W, BTN_H, 12, RGB(190, 40, 40));
+  cv.drawRoundRect(BTN_SNZ_X, BTN_Y, BTN_W, BTN_H, 12, RGB(190, 220, 255));
+  cv.drawRoundRect(BTN_STOP_X, BTN_Y, BTN_W, BTN_H, 12, RGB(255, 190, 190));
+  cv.setTextColor(RGB(255, 255, 255));
+  cv.setTextDatum(MC_DATUM);
+  char sb[16];
+  snprintf(sb, sizeof(sb), "%d min", g_alSnz);
+  cv.drawString("Snooze", BTN_SNZ_X + BTN_W / 2, BTN_Y + 20, 4);
+  cv.drawString(sb, BTN_SNZ_X + BTN_W / 2, BTN_Y + 43, 2);
+  cv.drawString("Stop", BTN_STOP_X + BTN_W / 2, BTN_Y + BTN_H / 2, 4);
+}
+
+// On-screen alarm setter: tap the time in the corner.
+#define PANEL_DIG_H 56
+static void drawAlarmPanel() {
+  const uint16_t bg = RGB(10, 30, 60), fg = RGB(235, 245, 255), acc = RGB(120, 190, 240);
+  cv.fillRoundRect(70, 22, 340, 276, 14, bg);
+  cv.drawRoundRect(70, 22, 340, 276, 14, acc);
+  cv.setTextDatum(TC_DATUM);
+  cv.setTextColor(fg);
+  cv.drawString("Alarm clock", 240, 32, 4);
+  float x0, hC, mC;
+  digitsGeom(240, PANEL_DIG_H, x0, hC, mC);
+  const int h24 = g_alMin / 60, mm = g_alMin % 60;
+  const int hs = g_h24 ? h24 : (h24 % 12 == 0 ? 12 : h24 % 12);
+  drawDigits(240, 110, PANEL_DIG_H, hs, mm, g_h24, true, g_alOn ? RGB(255, 214, 95) : RGB(130, 150, 175));
+  const float cx[2] = {hC, mC};
+  for (int i = 0; i < 2; i++) {
+    cv.fillTriangle(cx[i] - 16, 100, cx[i] + 16, 100, cx[i], 76, acc);
+    cv.fillTriangle(cx[i] - 16, 178, cx[i] + 16, 178, cx[i], 202, acc);
+  }
+  if (!g_h24) {
+    cv.fillRoundRect(345, 126, 56, 36, 8, RGB(40, 90, 150));
+    cv.setTextDatum(MC_DATUM);
+    cv.drawString(h24 < 12 ? "AM" : "PM", 373, 144, 4);
+  }
+  cv.setTextDatum(MC_DATUM);
+  cv.fillRoundRect(90, 244, 130, 42, 10, g_alOn ? RGB(30, 130, 70) : RGB(90, 100, 115));
+  cv.drawString(g_alOn ? "Alarm ON" : "Alarm OFF", 155, 265, 4);
+  cv.fillRoundRect(260, 244, 130, 42, 10, RGB(40, 90, 150));
+  cv.drawString("Done", 325, 265, 4);
+  cv.setTextColor(RGB(150, 180, 210));
+  cv.drawString("days and loudness: web page", 240, 224, 2);
+}
+
+// Touch while the panel is open. Arrows repeat while held; the buttons act once.
+static void alPanelTouch(float wx, float wy, bool press, bool rep, uint32_t now) {
+  alPanelAt = now;
+  auto in = [&](float x, float y, float w, float h) { return wx >= x && wx < x + w && wy >= y && wy < y + h; };
+  float x0, hC, mC;
+  digitsGeom(240, PANEL_DIG_H, x0, hC, mC);
+  const int hh = g_alMin / 60, mi = g_alMin % 60;
+  bool changed = false;
+  if (press || rep) {
+    if (in(hC - 38, 66, 76, 52))       { g_alMin = ((hh + 1) % 24) * 60 + mi; changed = true; }
+    else if (in(hC - 38, 160, 76, 52)) { g_alMin = ((hh + 23) % 24) * 60 + mi; changed = true; }
+    else if (in(mC - 38, 66, 76, 52))  { g_alMin = hh * 60 + (mi + 1) % 60; changed = true; }
+    else if (in(mC - 38, 160, 76, 52)) { g_alMin = hh * 60 + (mi + 59) % 60; changed = true; }
+  }
+  if (press) {
+    if (!g_h24 && in(340, 120, 66, 48)) { g_alMin = (g_alMin + 720) % 1440; changed = true; }
+    else if (in(90, 244, 130, 42)) { g_alOn = !g_alOn; alFiredDay = -1; }
+    else if (in(260, 244, 130, 42)) { alPanel = false; saveSettings(); }
+  }
+  if (changed) { g_alOn = true; alFiredDay = -1; }
+}
+
 static void drawScene(float t, uint32_t now) {
   drawRays(t);
   for (auto &k : kelp) {
@@ -1053,6 +1290,7 @@ static void drawScene(float t, uint32_t now) {
     Fish &f = fishes[i];
     float wag = sinf(t * 9.0f + f.ph) * 4.0f;
     float fin = sinf(t * 6.0f + f.ph) * 4.0f;
+    cv.fl = alState == AL_RAMP; cv.fc = f.y;          // the minute before the alarm the fish swim upside down
     switch (f.type) {
       case TANG:  drawTang(f.x, f.y, f.dir, wag); break;
       case CLOWN: drawClown(f.x, f.y, f.dir, wag); break;
@@ -1060,6 +1298,7 @@ static void drawScene(float t, uint32_t now) {
       case GOLD:  drawGold(f.x, f.y, f.dir, wag); break;
       case NEON:  drawNeon(f.x, f.y, f.dir, wag * .6f); break;
     }
+    cv.fl = false;
   }
   for (auto &fd : food) if (fd.on) cv.fillCircle(fd.x, fd.y, 2, RGB(235, 200, 120));
   for (auto &r : rings) {
@@ -1085,7 +1324,8 @@ static void drawScene(float t, uint32_t now) {
     cv.drawCircle(bx, by, b.r, RGB(205, 232, 255));
     cv.drawPixel(bx - b.r / 3, by - b.r / 3, TFT_WHITE);
   }
-  drawClock();
+  if (alActive()) drawAlarmScreen(t, now); else drawClock();
+  if (alPanel) drawAlarmPanel();
   if (infoUntil > now) drawInfo(now);
 }
 
@@ -1097,6 +1337,8 @@ void setup() {
   g_invert = prefs.getBool("invert", false); g_swaprb = prefs.getBool("swaprb", DEFAULT_SWAPRB);
   g_motion = prefs.getBool("motion", false); g_mmin = constrain(prefs.getInt("mmin", 10), 1, 240); g_msens = constrain(prefs.getInt("msens", 5), 1, 10);
   g_host = prefs.getString("host", DEFAULT_HOST);
+  g_alOn = prefs.getBool("alon", false); g_alMin = constrain(prefs.getInt("almin", 7 * 60), 0, 1439); g_alDays = prefs.getInt("aldays", 0x7F) & 0x7F;
+  g_alSnz = constrain(prefs.getInt("alsnz", 9), 1, 30); g_alVol = constrain(prefs.getInt("alvol", 70), 1, 100);
   g_night = prefs.getBool("night", false); g_nstart = constrain(prefs.getInt("nstart", 22 * 60), 0, 1439); g_nend = constrain(prefs.getInt("nend", 7 * 60), 0, 1439);
   setenv("TZ", g_tz.c_str(), 1); tzset();
   { uint32_t lt = prefs.getUInt("lastt", 0);                    // restore the last saved time (no battery clock)
@@ -1167,7 +1409,7 @@ void loop() {
   bool btn = digitalRead(0);
   if (!btn && lastBtn) {
     lastActivity = now;
-    if (nightWake(now)) {} else if (g_asleep) wakeScreen(3); else infoUntil = (infoUntil > now) ? 0 : now + 20000;
+    if (alActive()) alStop(); else if (nightWake(now)) {} else if (g_asleep) wakeScreen(3); else infoUntil = (infoUntil > now) ? 0 : now + 20000;
   }
   lastBtn = btn;
 
@@ -1175,7 +1417,13 @@ void loop() {
   int px, py;
   bool touched = halTouch(px, py);
   if (touched) lastActivity = now;
-  if (touched && now - lastTouch > 120) {
+  static bool wasTouched = false;
+  static uint32_t pressAt = 0;
+  const bool press = touched && !wasTouched;
+  if (press) pressAt = now;
+  wasTouched = touched;
+  const bool rep = touched && !press && now - pressAt > 450;
+  if (touched && (press || now - lastTouch > 120)) {
     lastTouch = now;
     if (nightWake(now)) {
       // touched in the dark: just light the screen
@@ -1183,13 +1431,23 @@ void loop() {
       wakeScreen(2);                  // the first touch only wakes the screen
     } else {
       float wx = px / cv.sx, wy = max(py / cv.sy, 14.0f);
-      if (fabsf(wx - CHEST_X) < 36 && wy > CHEST_BASE - 48 && wy < CHEST_BASE + 10) {
+      if (alState == AL_RING) {
+        if (press && wy >= BTN_Y && wy < BTN_Y + BTN_H) {
+          if (wx >= BTN_SNZ_X && wx < BTN_SNZ_X + BTN_W) alSnooze(now);
+          else if (wx >= BTN_STOP_X && wx < BTN_STOP_X + BTN_W) alStop();
+        }
+      } else if (alPanel) {
+        alPanelTouch(wx, wy, press, rep, now);
+      } else if (wx > VW - 170 && wy < 64) {
+        if (press) { alPanel = true; alPanelAt = now; }          // tap the time to set the alarm
+      } else if (fabsf(wx - CHEST_X) < 36 && wy > CHEST_BASE - 48 && wy < CHEST_BASE + 10) {
         if (chestState == CHEST_CLOSED) { chestState = CHEST_OPENING; chestT = 0; }   // tap the chest to open it
       } else feedAt(wx, wy, 3);
     }
   }
 
   STAGE(ST_SLEEP);
+  updateAlarm(now);
   updateNight(now);
   updateSleep();
   if (g_asleep || g_isNight) { STAGE(ST_IDLE); updateCrumb(millis() - now); delay(40); return; }

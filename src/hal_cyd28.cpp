@@ -208,6 +208,7 @@ static void calibrate() {
   float fit[6];
   double rms = 0;
   bool ok = false;
+  float best[6] = {0}; double bestRms = 1e9;
   calMessage("Touch calibration", "Touch each crosshair as shown", TFT_CYAN);
   delay(2000);
   RawTouch p;
@@ -233,11 +234,15 @@ static void calibrate() {
       rx[i] = sumX / n; ry[i] = sumY / n;
       sx[i] = tx[i]; sy[i] = ty[i];
     }
-    ok = fitAffine(rx, ry, sx, sy, 5, fit, rms) && rms <= 12.0;
+    const bool fitted = fitAffine(rx, ry, sx, sy, 5, fit, rms);
+    if (fitted && rms < bestRms) { bestRms = rms; memcpy(best, fit, sizeof(best)); }
+    ok = fitted && rms <= 12.0;
     Serial.printf("Touch cal fit: %s, rms %.1f px\n", ok ? "ok" : "inconsistent", rms);
     if (!ok) { calMessage("Taps were not consistent", "Let's try again", TFT_ORANGE); delay(1800); }
   }
   tft.fillScreen(TFT_BLACK);
+  // Resistive panels are noisy: if no attempt was tight, keep the best one rather than asking again on every boot.
+  if (!ok && bestRms <= 30.0) { memcpy(fit, best, sizeof(fit)); ok = true; }
   if (ok) { memcpy(touchAff, fit, sizeof(touchAff)); haveAff = true; saveAff(); }
   tft.setRotation(oldRot);
   halApplyColors();
@@ -283,7 +288,11 @@ static void audioTask(void *) {
   for (;;) {
     audioMix(mono, 256);
     for (int i = 0; i < 256; i++) {
-      uint16_t v = (uint16_t)(mono[i] + 32768);   // DAC wants offset-binary in the high byte
+      static uint32_t dz = 1;                       // dither: trade the 8-bit rounding chirps for faint hiss
+      dz = dz * 1664525u + 1013904223u;
+      int32_t m = mono[i] + (int32_t)((dz >> 24) & 0xFF) - 128;
+      if (m > 32767) m = 32767; else if (m < -32768) m = -32768;
+      uint16_t v = (uint16_t)(m + 32768);   // DAC wants offset-binary in the high byte
       out[2 * i] = v; out[2 * i + 1] = v;
     }
     size_t written;
