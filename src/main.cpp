@@ -33,6 +33,7 @@ WebServer server(80);
 // Settings (persisted in NVS, editable from the web page)
 volatile int g_vol = 60;       // 0..100 (60 = the original loop level)
 volatile bool g_snd = true;
+volatile bool g_sBub = true, g_sDiv = true, g_sFeed = true;
 int g_rot = DEFAULT_ROT;       // 1 or 3 (180 degrees apart)
 float g_fps = 0;
 bool g_motion = false;         // Wi-Fi motion sensing: screen sleeps when nobody is around
@@ -78,7 +79,7 @@ static inline uint16_t RGB(int r, int g, int b) {
 static inline uint16_t bswap16(uint16_t v) { return (v >> 8) | (v << 8); }
 
 static void saveSettings() {
-  prefs.putInt("rot", g_rot); prefs.putBool("snd", g_snd); prefs.putInt("vol", g_vol);
+  prefs.putInt("rot", g_rot); prefs.putBool("snd", g_snd); prefs.putBool("sbub", g_sBub); prefs.putBool("sdiv", g_sDiv); prefs.putBool("sfeed", g_sFeed); prefs.putInt("vol", g_vol);
   prefs.putBool("afeed", g_auto); prefs.putInt("aint", g_aint); prefs.putBool("h24", g_h24); prefs.putString("tz", g_tz); prefs.putInt("dfmt", g_datefmt);
   prefs.putBool("invert", g_invert); prefs.putBool("swaprb", g_swaprb);
   prefs.putBool("motion", g_motion); prefs.putInt("mmin", g_mmin); prefs.putInt("msens", g_msens);
@@ -614,6 +615,9 @@ input[type=range]{width:55%}select,button{font:inherit;padding:8px 12px;border-r
 button,.b{background:#2fb36b;color:#fff;text-decoration:none;border-radius:8px;padding:8px 12px;margin-top:10px}small{color:#9cc4e4}</style></head><body><main>
 <h1>&#128032; Fish Tank</h1><small id="st">loading&hellip;</small>
 <div class="c"><label>Sound <input type="checkbox" id="snd"></label>
+<label>&nbsp;&nbsp;Bubbles <input type="checkbox" id="sbub"></label>
+<label>&nbsp;&nbsp;Diver k-ching <input type="checkbox" id="sdiv"></label>
+<label>&nbsp;&nbsp;Feeding ding <input type="checkbox" id="sfeed"></label>
 <label>Volume <input type="range" id="vol" min="0" max="100"><span id="vv"></span></label>
 <label>Screen rotation <select id="rot"><option value="@L@">USB on left</option><option value="@R@">USB on right</option></select></label>
 <label>Invert colours <input type="checkbox" id="inv"></label>
@@ -685,13 +689,13 @@ window.envId=s.env;$('envname').textContent=s.env;$('recal').style.display=s.boa
 $('now').textContent=s.now+(s.ntp?'  (internet time)':'');
 if(!s.ntp&&!window.timeSent){window.timeSent=1;fetch('/api/settime?epoch='+Math.floor(Date.now()/1000),{method:'POST'})}
 $('nstat').textContent=s.isnight?'(it is night now: screen off)':'';
-if(!busy&&!dirty){$('alon').checked=s.alon;setTime('al',s.atime);for(let i=0;i<7;i++)$('ad'+i).checked=!!((s.adays>>i)&1);$('alsnz').value=s.asnz;$('alvol').value=s.avol;$('alvv').textContent=s.avol;$('night').checked=s.night;setTime('nstart',s.nstart);setTime('nend',s.nend);$('tz').value=s.tz;$('dfmt').value=s.dfmt;$('inv').checked=s.inv;$('swaprb').checked=s.swaprb;$('motion').checked=s.motion;$('mmin').value=s.mmin;$('msens').value=s.msens;$('msv').textContent=s.msens;$('h24').checked=s.h24;$('auto').checked=s.auto;$('aint').value=s.aint;if(document.activeElement!==$('host'))$('host').value=s.host;$('hl').textContent=s.host;$('snd').checked=s.snd;$('vol').value=s.vol;$('vv').textContent=s.vol;$('rot').value=s.rot}
+if(!busy&&!dirty){$('alon').checked=s.alon;setTime('al',s.atime);for(let i=0;i<7;i++)$('ad'+i).checked=!!((s.adays>>i)&1);$('alsnz').value=s.asnz;$('alvol').value=s.avol;$('alvv').textContent=s.avol;$('night').checked=s.night;setTime('nstart',s.nstart);setTime('nend',s.nend);$('tz').value=s.tz;$('dfmt').value=s.dfmt;$('inv').checked=s.inv;$('swaprb').checked=s.swaprb;$('motion').checked=s.motion;$('mmin').value=s.mmin;$('msens').value=s.msens;$('msv').textContent=s.msens;$('h24').checked=s.h24;$('auto').checked=s.auto;$('aint').value=s.aint;if(document.activeElement!==$('host'))$('host').value=s.host;$('hl').textContent=s.host;$('snd').checked=s.snd;$('sbub').checked=s.sbub;$('sdiv').checked=s.sdiv;$('sfeed').checked=s.sfeed;$('vol').value=s.vol;$('vv').textContent=s.vol;$('rot').value=s.rot}
  $('alstat').textContent=['','sunrise starting\u2026','RINGING','snoozed'][s.alstate]||(s.almiss?'last alarm was not stopped':'');
  $('st').textContent='v'+s.ver+' · WiFi '+(s.ssid||'?')+' · '+s.ip+' · '+s.rssi+' dBm · up '+Math.floor(s.up/60)+' min (last restart: '+s.rst+') · '+s.fps.toFixed(1)+' fps'}
 async function send(){if(!$('mmin').value||!$('aint').value){$('amsg').textContent='enter a number in the sleep / auto feed boxes';return}
-busy=1;await fetch('/api/set?snd='+($('snd').checked?1:0)+'&vol='+$('vol').value+'&rot='+$('rot').value+'&motion='+($('motion').checked?1:0)+'&mmin='+$('mmin').value+'&msens='+$('msens').value+'&inv='+($('inv').checked?1:0)+'&swaprb='+($('swaprb').checked?1:0)+'&night='+($('night').checked?1:0)+'&nstart='+getTime('nstart')+'&nend='+getTime('nend')+'&tz='+encodeURIComponent($('tz').value)+'&dfmt='+$('dfmt').value+'&h24='+($('h24').checked?1:0)+'&auto='+($('auto').checked?1:0)+'&aint='+$('aint').value+'&alon='+($('alon').checked?1:0)+'&atime='+getTime('al')+'&adays='+[0,1,2,3,4,5,6].reduce((a,i)=>a+($('ad'+i).checked?1<<i:0),0)+'&asnz='+$('alsnz').value+'&avol='+$('alvol').value,{method:'POST'});busy=0;dirty=0;$('amsg').textContent='Applied \u2713'}
+busy=1;await fetch('/api/set?snd='+($('snd').checked?1:0)+'&sbub='+($('sbub').checked?1:0)+'&sdiv='+($('sdiv').checked?1:0)+'&sfeed='+($('sfeed').checked?1:0)+'&vol='+$('vol').value+'&rot='+$('rot').value+'&motion='+($('motion').checked?1:0)+'&mmin='+$('mmin').value+'&msens='+$('msens').value+'&inv='+($('inv').checked?1:0)+'&swaprb='+($('swaprb').checked?1:0)+'&night='+($('night').checked?1:0)+'&nstart='+getTime('nstart')+'&nend='+getTime('nend')+'&tz='+encodeURIComponent($('tz').value)+'&dfmt='+$('dfmt').value+'&h24='+($('h24').checked?1:0)+'&auto='+($('auto').checked?1:0)+'&aint='+$('aint').value+'&alon='+($('alon').checked?1:0)+'&atime='+getTime('al')+'&adays='+[0,1,2,3,4,5,6].reduce((a,i)=>a+($('ad'+i).checked?1<<i:0),0)+'&asnz='+$('alsnz').value+'&avol='+$('alvol').value,{method:'POST'});busy=0;dirty=0;$('amsg').textContent='Applied \u2713'}
 const mark=()=>{dirty=1;$('amsg').textContent='not applied yet'};
-['alon','al_h','al_m','ad0','ad1','ad2','ad3','ad4','ad5','ad6','alsnz','alvol','snd','h24','auto','aint','rot','motion','mmin','msens','inv','swaprb','tz','dfmt','night','nstart_h','nstart_m','nend_h','nend_m'].forEach(i=>{$(i).onchange=mark;$(i).oninput=mark});$('vol').oninput=()=>{$('vv').textContent=$('vol').value;mark()};$('msens').oninput=()=>{$('msv').textContent=$('msens').value;mark()};$('apply').onclick=send;$('alvol').oninput=()=>{$('alvv').textContent=$('alvol').value;mark()};$('altest').onclick=()=>fetch('/api/alarm?cmd=test',{method:'POST'});$('alstop').onclick=()=>fetch('/api/alarm?cmd=stop',{method:'POST'});
+['alon','al_h','al_m','ad0','ad1','ad2','ad3','ad4','ad5','ad6','alsnz','alvol','snd','sbub','sdiv','sfeed','h24','auto','aint','rot','motion','mmin','msens','inv','swaprb','tz','dfmt','night','nstart_h','nstart_m','nend_h','nend_m'].forEach(i=>{$(i).onchange=mark;$(i).oninput=mark});$('vol').oninput=()=>{$('vv').textContent=$('vol').value;mark()};$('msens').oninput=()=>{$('msv').textContent=$('msens').value;mark()};$('apply').onclick=send;$('alvol').oninput=()=>{$('alvv').textContent=$('alvol').value;mark()};$('altest').onclick=()=>fetch('/api/alarm?cmd=test',{method:'POST'});$('alstop').onclick=()=>fetch('/api/alarm?cmd=stop',{method:'POST'});
 const CAUSE=['no motion','motion','touch','BOOT button','setting turned off','sensor offline','alarm'];
 async function mlog(){try{const a=await (await fetch('/api/motionlog')).json();
  $('mlog').innerHTML=a.length?a.map(e=>((e.c&128)?(e.e?'\u25cb motion seen':'\u25cb quiet'):(e.e?'\u2600 woke':'\u263e slept'))+' \u00b7 '+(e.w||'up '+Math.floor(e.up/60)+' min')+' \u00b7 '+CAUSE[e.c&127]+((e.c&128)?' \u00b7 night mode, screen stays dark':'')).join('<br>'):'<small>No sleep/wake events yet.</small>'}catch(e){}}
@@ -826,8 +830,9 @@ static String statusJson() {
            g_h24 ? "true" : "false", ssid.c_str(), g_snd ? "true" : "false", (int)g_vol, g_rot, g_auto ? "true" : "false", g_aint, g_host.c_str(), WiFi.localIP().toString().c_str(), WiFi.RSSI(), millis() / 1000UL, g_fps);
   String o(b);
   o.remove(o.length() - 1);
-  char a[160];
-  snprintf(a, sizeof(a), ",\"alon\":%s,\"atime\":\"%02d:%02d\",\"adays\":%d,\"asnz\":%d,\"avol\":%d,\"alstate\":%d,\"almiss\":%s}",
+  char a[200];
+  snprintf(a, sizeof(a), ",\"sbub\":%s,\"sdiv\":%s,\"sfeed\":%s,\"alon\":%s,\"atime\":\"%02d:%02d\",\"adays\":%d,\"asnz\":%d,\"avol\":%d,\"alstate\":%d,\"almiss\":%s}",
+           g_sBub ? "true" : "false", g_sDiv ? "true" : "false", g_sFeed ? "true" : "false",
            g_alOn ? "true" : "false", g_alMin / 60, g_alMin % 60, g_alDays, g_alSnz, g_alVol, (int)alState, alMissed ? "true" : "false");
   return o + a;
 }
@@ -880,6 +885,9 @@ static void setupWeb() {
     int v;
     if (numArg("vol", 0, 100, v)) g_vol = v;
     if (numArg("snd", 0, 1, v)) g_snd = v != 0;
+    if (numArg("sbub", 0, 1, v)) g_sBub = v != 0;
+    if (numArg("sdiv", 0, 1, v)) g_sDiv = v != 0;
+    if (numArg("sfeed", 0, 1, v)) g_sFeed = v != 0;
     if (numArg("motion", 0, 1, v)) g_motion = v != 0;
     if (numArg("mmin", 1, 240, v)) g_mmin = v;
     if (numArg("msens", 1, 10, v)) g_msens = v;
@@ -968,6 +976,8 @@ static void setupWeb() {
     if (c == "test") alTest(millis()); else if (c == "stop") alStop();
     server.send(200, "text/plain", "ok");
   });
+  server.on("/api/bub", HTTP_ANY, []() { audioBubMode(server.arg("m").length() ? server.arg("m").toInt() : 1, server.arg("g").toInt()); server.send(200, "text/plain", "ok"); });   // CYD bubble variants
+  server.on("/api/lamb", HTTP_ANY, []() { audioLamb(); server.send(200, "text/plain", "ok"); });   // speaker test tune
   server.on("/api/diver", HTTP_ANY, []() {         // send the diver out right now (opens the chest too)
     static bool nextRight = true;
     if (!diver.on) {
@@ -1332,7 +1342,7 @@ static void drawScene(float t, uint32_t now) {
 void setup() {
   Serial.begin(115200);
   prefs.begin("tank", false);
-  g_rot = prefs.getInt("rot", DEFAULT_ROT); g_snd = prefs.getBool("snd", true); g_vol = prefs.getInt("vol", 60);
+  g_rot = prefs.getInt("rot", DEFAULT_ROT); g_snd = prefs.getBool("snd", true); g_sBub = prefs.getBool("sbub", true); g_sDiv = prefs.getBool("sdiv", true); g_sFeed = prefs.getBool("sfeed", true); g_vol = prefs.getInt("vol", 60);
   g_auto = prefs.getBool("afeed", false); g_aint = prefs.getInt("aint", 60); g_h24 = prefs.getBool("h24", false); g_tz = prefs.getString("tz", g_tz); g_datefmt = constrain(prefs.getInt("dfmt", 0), 0, 4);
   g_invert = prefs.getBool("invert", false); g_swaprb = prefs.getBool("swaprb", DEFAULT_SWAPRB);
   g_motion = prefs.getBool("motion", false); g_mmin = constrain(prefs.getInt("mmin", 10), 1, 240); g_msens = constrain(prefs.getInt("msens", 5), 1, 10);

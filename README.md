@@ -33,6 +33,8 @@ Four builds, one codebase: **Freenove FNK0104S 4.0"** (`pio run -e freenove4`), 
 - **Date & time card**: time zone, date format (5 styles), 12/24 h, and "Set time from this device" for boards without internet; the last time is saved and restored after a restart.
 - **Treasure chest** that opens every so often and fills the tank with bubbles (button on the web page).
 - **Scuba diver**: every sixth time the chest opens he swims in from one side, takes a bag of gold (the chest goes empty), and swims out the other, with a cash-register "k-ching" as he goes. Tap the chest on the screen to open it; "Send the diver" on the web page calls him right away.
+- **Alarm clock**: tap the time on the screen to set it (or use the web page: days, snooze, loudness). A minute before it rings the fish turn upside down and a sunrise glow builds; then the fish circle a big clock until you tap Stop or Snooze.
+- **Sound switches**: bubbles, the diver's k-ching and the feeding ding can each be turned off on the web page. On the CYD the bubbles are a separate 44.1 kHz recording (`src/bubbles_cyd.wav`) because its 8-bit speaker output chirps at 16 kHz.
 - OTA updates: `espota.py -i <ip> -p 3232 -f .pio/build/<env>/firmware.bin -r` (hostname = the board's hostname).
 
 ## Rendering

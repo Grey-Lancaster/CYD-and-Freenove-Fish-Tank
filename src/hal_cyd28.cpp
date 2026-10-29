@@ -263,6 +263,10 @@ void halRecalibrateTouch() {
 }
 
 bool halTouch(int &x, int &y) {
+  // The touch clock (GPIO25) is also the DAC1 pin next to the speaker: clocking the controller every frame put a
+  // regular tick under the sound. The controller pulls IRQ low while pressed, so only talk to it then.
+  pinMode(XPT2046_IRQ, INPUT);
+  if (digitalRead(XPT2046_IRQ) != LOW) return false;
   xptBegin();                    // sound can disturb these pins; cheap to reassert
   RawTouch p;
   if (!rawTouched(p)) return false;
@@ -283,16 +287,34 @@ bool halTouch(int &x, int &y) {
 void halApplySound() {}          // muting is done in audioMix
 
 static void audioTask(void *) {
-  static int16_t mono[256];
-  static uint16_t out[512];
+  // Output at 44.1 kHz like PhotoFrame's WAV: at 16 kHz the 8-bit DAC leaves loud images around 8-12 kHz that a tiny
+  // speaker turns into chirps. The 16 kHz effects mix is linearly interpolated up; the ambience is already 44.1 kHz.
+  static int16_t fx[64], bub[256];
+  static uint16_t out[256 * 2];
+  const uint32_t step = (uint32_t)(16000.0 * 65536.0 / 44100.0);
+  uint32_t phase = 0;
+  int32_t prev = 0, cur = 0;
+  int fxPos = 64;
   for (;;) {
-    audioMix(mono, 256);
+    audioBubbles44(bub, 256);
     for (int i = 0; i < 256; i++) {
-      static uint32_t dz = 1;                       // dither: trade the 8-bit rounding chirps for faint hiss
-      dz = dz * 1664525u + 1013904223u;
-      int32_t m = mono[i] + (int32_t)((dz >> 24) & 0xFF) - 128;
+      phase += step;
+      while (phase >= 65536) {
+        phase -= 65536;
+        if (fxPos >= 64) { audioMix(fx, 64); fxPos = 0; }
+        prev = cur; cur = fx[fxPos++];
+      }
+      int32_t m = prev + (int32_t)(((int64_t)(cur - prev) * phase) >> 16) + bub[i];
       if (m > 32767) m = 32767; else if (m < -32768) m = -32768;
-      uint16_t v = (uint16_t)(m + 32768);   // DAC wants offset-binary in the high byte
+      // The DAC only has 8 bits (the high byte). Round with error feedback so the rounding noise moves to high
+      // frequencies, where this speaker and ear barely respond, instead of a hiss across the whole range.
+      static int32_t err = 0;
+      int32_t acc = m + err;
+      int32_t q = (acc + 128) >> 8;
+      if (q > 127) q = 127; else if (q < -128) q = -128;
+      err = acc - (q << 8);
+      if (err > 512) err = 512; else if (err < -512) err = -512;
+      const uint16_t v = (uint16_t)((q + 128) << 8);  // DAC wants offset-binary in the high byte
       out[2 * i] = v; out[2 * i + 1] = v;
     }
     size_t written;
@@ -303,17 +325,17 @@ static void audioTask(void *) {
 void halAudioStart() {
   i2s_config_t cfg = {};
   cfg.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_DAC_BUILT_IN);
-  cfg.sample_rate = 16000;
+  cfg.sample_rate = 44100;
   cfg.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
   cfg.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
   cfg.communication_format = (i2s_comm_format_t)I2S_COMM_FORMAT_STAND_MSB;
   cfg.intr_alloc_flags = 0;
-  cfg.dma_buf_count = 8;
+  cfg.dma_buf_count = 16;   // ~93 ms at 44.1 kHz: rides out short stalls on the core
   cfg.dma_buf_len = 256;
   cfg.use_apll = false;
   cfg.tx_desc_auto_clear = true;
   if (i2s_driver_install(I2S_NUM_0, &cfg, 0, NULL) != ESP_OK) { Serial.println("I2S install failed"); return; }
   i2s_set_dac_mode(I2S_DAC_CHANNEL_LEFT_EN);   // GPIO26 only; GPIO25 is the touch controller's clock
-  xTaskCreatePinnedToCore(audioTask, "bubbles", 4096, NULL, 2, NULL, 0);
+  xTaskCreatePinnedToCore(audioTask, "bubbles", 4096, NULL, 2, NULL, 1);   // core 1 like PhotoFrame: core 0 is busy with WiFi
 }
 #endif
