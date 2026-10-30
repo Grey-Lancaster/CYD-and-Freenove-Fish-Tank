@@ -335,19 +335,25 @@ static void connectWifi() {
 }
 
 // Time and date text in the chosen formats (date is empty until the clock is set, or when hidden).
+static bool isES() { return wifiLangIsSpanish(); }
+
 static void clockStrings(char *buf, size_t bn, char *date, size_t dn) {
   int h, mi;
   date[0] = 0;
   struct tm tmv;
   if (getLocalTime(&tmv, 0)) {
     h = tmv.tm_hour; mi = tmv.tm_min;
-    static const char *dnm[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-    static const char *mnm[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+    static const char *dnE[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    static const char *mnE[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+    static const char *dnS[] = {"Dom", "Lun", "Mar", "Mie", "Jue", "Vie", "Sab"};      // no accents: the built-in fonts have none
+    static const char *mnS[] = {"Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"};
+    const char **dnm = isES() ? dnS : dnE, **mnm = isES() ? mnS : mnE;
     switch (g_datefmt) {
       case 0: snprintf(date, dn, "%s %02d/%02d/%02d", dnm[tmv.tm_wday], tmv.tm_mon + 1, tmv.tm_mday, tmv.tm_year % 100); break;
       case 1: snprintf(date, dn, "%s %02d/%02d/%02d", dnm[tmv.tm_wday], tmv.tm_mday, tmv.tm_mon + 1, tmv.tm_year % 100); break;
       case 2: snprintf(date, dn, "%s %04d-%02d-%02d", dnm[tmv.tm_wday], tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday); break;
-      case 3: snprintf(date, dn, "%s, %s %d", dnm[tmv.tm_wday], mnm[tmv.tm_mon], tmv.tm_mday); break;
+      case 3: if (isES()) snprintf(date, dn, "%s, %d %s", dnm[tmv.tm_wday], tmv.tm_mday, mnm[tmv.tm_mon]);
+              else snprintf(date, dn, "%s, %s %d", dnm[tmv.tm_wday], mnm[tmv.tm_mon], tmv.tm_mday); break;
       default: break;
     }
   } else {
@@ -612,8 +618,8 @@ main{max-width:460px;margin:0 auto;padding:16px}h1{margin:.2em 0}
 .c{background:#12466f;border-radius:12px;padding:14px;margin:12px 0}
 label{display:flex;justify-content:space-between;align-items:center;margin:10px 0}
 input[type=range]{width:55%}select,button{font:inherit;padding:8px 12px;border-radius:8px;border:0}
-button,.b{background:#2fb36b;color:#fff;text-decoration:none;border-radius:8px;padding:8px 12px;margin-top:10px}small{color:#9cc4e4}</style></head><body><main>
-<h1>&#128032; Fish Tank</h1><small id="st">loading&hellip;</small>
+button,.b{background:#2fb36b;color:#fff;text-decoration:none;border-radius:8px;padding:8px 12px;margin-top:10px}small{color:#9cc4e4}.lg{margin:0;padding:3px 10px;font-size:13px;background:#12466f}.lg.on{background:#2fb36b}</style></head><body><main>
+<div style="display:flex;justify-content:space-between;align-items:center"><h1>&#128032; Fish Tank</h1><span><button id="lEN" type="button" class="lg">EN</button> <button id="lES" type="button" class="lg">ES</button></span></div><small id="st">loading&hellip;</small>
 <div class="c"><label>Sound <input type="checkbox" id="snd"></label>
 <label>&nbsp;&nbsp;Bubbles <input type="checkbox" id="sbub"></label>
 <label>&nbsp;&nbsp;Diver k-ching <input type="checkbox" id="sdiv"></label>
@@ -674,32 +680,45 @@ button,.b{background:#2fb36b;color:#fff;text-decoration:none;border-radius:8px;p
 <button id="hsave">Save &amp; reboot</button> <small id="hmsg"></small></div>
 <script>
 const $=i=>document.getElementById(i);let busy=0,dirty=0;
+const ES={"Sound":"Sonido","Bubbles":"Burbujas","Diver k-ching":"Buzo (ka-ching)","Feeding ding":"Ding de comida","Volume":"Volumen","Screen rotation":"Rotación de la pantalla","USB on left":"USB a la izquierda","USB on right":"USB a la derecha","Invert colours":"Invertir colores","Swap red and blue":"Intercambiar rojo y azul","Use these if the colours look wrong (like a photo negative, or red and blue swapped).":"Úsalos si los colores se ven mal (como un negativo, o con el rojo y el azul cambiados).","Feed the fish":"Dar de comer a los peces","Open the treasure chest":"Abrir el cofre del tesoro","Send the diver":"Enviar al buzo","Auto feed":"Comida automática","Every (seconds)":"Cada (segundos)","Date & time":"Fecha y hora","Time zone":"Zona horaria","US Eastern":"EE. UU. Este","US Central":"EE. UU. Centro","US Mountain":"EE. UU. Montaña","US Arizona":"EE. UU. Arizona","US Pacific":"EE. UU. Pacífico","US Alaska":"EE. UU. Alaska","US Hawaii":"EE. UU. Hawái","UK / Ireland":"Reino Unido / Irlanda","Central Europe":"Europa central (España)","Eastern Europe":"Europa oriental","India":"India","China":"China","Japan":"Japón","Australia East":"Australia este","UTC":"UTC","Date format":"Formato de fecha","Tue 10/20/26 (month/day)":"Mar 10/20/26 (mes/día)","Tue 20/10/26 (day/month)":"Mar 20/10/26 (día/mes)","Tue 2026-10-20":"Mar 2026-10-20","Tue, Oct 20":"Mar, 20 Oct","Hide the date":"Ocultar la fecha","24-hour time":"Hora de 24 horas","Set time from this device":"Ajustar la hora desde este dispositivo","Screenshot":"Captura de pantalla","live view":"vista en vivo","(the tank pauses for a second while it copies)":"(la pecera se detiene un segundo mientras copia)","Download PNG":"Descargar PNG","Alarm clock":"Despertador","Alarm on":"Alarma activada","Wake at":"Despertar a las","Snooze (minutes)":"Posponer (minutos)","Alarm loudness":"Volumen de la alarma","Test alarm":"Probar alarma","Stop alarm":"Parar alarma","A minute before, the tank silently brightens like a sunrise; at the set time the chime starts and the fish circle a big clock. You can also tap the time on the tank to set it. The alarm sounds even if the tank is muted.":"Un minuto antes, la pecera se ilumina en silencio como un amanecer; a la hora fijada suena el timbre y los peces rodean un reloj grande. También puedes tocar la hora en la pecera para ajustarla. La alarma suena aunque la pecera esté en silencio.","Night mode":"Modo nocturno","Screen and sound off at night":"Pantalla y sonido apagados por la noche","Off from":"Apagar desde","Back on at":"Encender a las","Uses the time zone above (the clock must be set). Touch the screen or press BOOT to light it for a minute.":"Usa la zona horaria de arriba (el reloj debe estar ajustado). Toca la pantalla o pulsa BOOT para encenderla un minuto.","Motion sleep":"Apagado por movimiento","(experimental)":"(experimental)","Sleep the screen when nobody is around":"Apagar la pantalla cuando no hay nadie","Sleep after (minutes)":"Apagar tras (minutos)","Sensitivity":"Sensibilidad","Clear log":"Borrar registro","Apply":"Aplicar","Applies sound, volume, rotation, colours, time zone, date format and the other settings above.":"Aplica el sonido, el volumen, la rotación, los colores, la zona horaria, el formato de fecha y los demás ajustes de arriba.","Firmware update":"Actualizar el firmware","Open the update page and choose the":"Abre la página de actualización y elige el archivo","update":"update","file for this board (":"para esta placa (","; not the factory file): it keeps your WiFi and settings.":"; no el archivo factory): conserva tu WiFi y tus ajustes.","Open update page":"Abrir la página de actualización","Restart log":"Registro de reinicios","(crashes and watchdog restarts, newest first)":"(fallos y reinicios del perro guardián, los más recientes primero)","Clear":"Borrar","System":"Sistema","Forget WiFi & restart":"Olvidar WiFi y reiniciar","Recalibrate touch":"Recalibrar la pantalla táctil","Hostname":"Nombre del equipo","letters, digits and dashes — reachable as":"letras, números y guiones — accesible como","Save & reboot":"Guardar y reiniciar","loading…":"cargando…","Applied ✓":"Aplicado ✓","not applied yet":"aún sin aplicar","enter a number in the sleep / auto feed boxes":"escribe un número en las casillas de apagado / comida automática","sensor warming up…":"el sensor se está preparando…","motion score ":"nivel de movimiento ","● moving":"● en movimiento","(quiet)":"(quieto)","· screen asleep":"· pantalla apagada","(internet time)":"(hora de internet)","(it is night now: screen off)":"(es de noche: pantalla apagada)","sunrise starting…":"empieza el amanecer…","RINGING":"SONANDO","snoozed":"pospuesta","last alarm was not stopped":"la última alarma no se detuvo","WiFi ":"WiFi ","up ":"activo "," min (last restart: ":" min (último reinicio: ","No sleep/wake events yet.":"Todavía no hay eventos.","None recorded.":"Ninguno registrado.","motion seen":"movimiento visto","quiet":"quieto","woke":"encendida","slept":"apagada","night mode, screen stays dark":"modo nocturno, la pantalla sigue apagada","no motion":"sin movimiento","motion":"movimiento","touch":"toque","BOOT button":"botón BOOT","setting turned off":"ajuste desactivado","sensor offline":"sensor sin señal","alarm":"alarma","12 AM (midnight)":"00:00 (medianoche)","12 PM (noon)":"12:00 (mediodía)","Forget all saved WiFi networks and restart? You will set up WiFi again on the screen.":"¿Olvidar todas las redes WiFi guardadas y reiniciar? Volverás a configurar el WiFi en la pantalla.","Restart and calibrate the touch screen again?":"¿Reiniciar y calibrar de nuevo la pantalla táctil?","Restarting…":"Reiniciando…","time set ✓":"hora ajustada ✓","Rebooting…":"Reiniciando…"};
+let lang=(navigator.language||'').toLowerCase().startsWith('es')?'es':'en',langBusy=0;
+const t=k=>(lang==='es'&&ES[k]!==undefined)?ES[k]:k;
+const DAYS={en:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],es:['Dom','Lun','Mar','Mié','Jue','Vie','Sáb']};
+function trText(){const w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);let n;
+ while(n=w.nextNode()){if(n.parentNode.tagName==='SCRIPT')continue;if(n.__o===undefined)n.__o=n.nodeValue;
+  const c=n.__o.trim();if(!c)continue;
+  n.nodeValue=(lang==='es'&&ES[c]!==undefined)?n.__o.replace(c,()=>ES[c]):n.__o}}
+
 function fillTime(id){const h=$(id+'_h'),mi=$(id+'_m');if(h.options.length)return;
- for(let i=0;i<24;i++){const t=i==0?'12 AM (midnight)':i<12?i+' AM':i==12?'12 PM (noon)':(i-12)+' PM';h.add(new Option(t,i))}
+ for(let i=0;i<24;i++){const x=lang==='es'?(i==0?t('12 AM (midnight)'):i==12?t('12 PM (noon)'):String(i).padStart(2,'0')+':00'):(i==0?'12 AM (midnight)':i<12?i+' AM':i==12?'12 PM (noon)':(i-12)+' PM');h.add(new Option(x,i))}
  for(let i=0;i<60;i+=5)mi.add(new Option(String(i).padStart(2,'0'),i))}
 function setTime(id,v){fillTime(id);const p=(v||'0:0').split(':'),h=+p[0],mm=+p[1],mi=$(id+'_m');
  if(![...mi.options].some(o=>+o.value==mm)){const vals=[...mi.options].map(o=>+o.value);vals.push(mm);vals.sort((a,b)=>a-b);mi.innerHTML='';vals.forEach(x=>mi.add(new Option(String(x).padStart(2,'0'),x)))}
  $(id+'_h').value=h;mi.value=mm}
 function getTime(id){return $(id+'_h').value+':'+String($(id+'_m').value).padStart(2,'0')}
 fillTime('nstart');fillTime('nend');fillTime('al');
-$('aldays').innerHTML=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((n,i)=>'<label style="display:inline;margin-right:8px"><input type=checkbox id=ad'+i+'> '+n+'</label>').join('');
+function buildDays(){const k=[0,1,2,3,4,5,6].map(i=>$('ad'+i)&&$('ad'+i).checked);
+ $('aldays').innerHTML=DAYS[lang].map((n,i)=>'<label style="display:inline;margin-right:8px"><input type=checkbox id=ad'+i+'> '+n+'</label>').join('');
+ k.forEach((c,i)=>{if(c)$('ad'+i).checked=true;$('ad'+i).onchange=()=>mark();$('ad'+i).oninput=()=>mark()})}
+buildDays();
 async function load(){const s=await (await fetch('/api/status')).json();
- $('mlive').textContent=s.motion?(s.mready?'motion score '+s.mscore+(s.mon?' \u25cf moving':' (quiet)')+(s.asleep?' \u00b7 screen asleep':''):'sensor warming up\u2026'):'';
+ if(s.lang&&s.lang!==lang&&!langBusy){lang=s.lang;applyLang()}
+ $('mlive').textContent=s.motion?(s.mready?t('motion score ')+s.mscore+(s.mon?' '+t('\u25cf moving'):' '+t('(quiet)'))+(s.asleep?' '+t('\u00b7 screen asleep'):''):t('sensor warming up\u2026')):'';
 window.envId=s.env;$('envname').textContent=s.env;$('recal').style.display=s.board=='cyd'?'inline-block':'none';
-$('now').textContent=s.now+(s.ntp?'  (internet time)':'');
+$('now').textContent=s.now+(s.ntp?'  '+t('(internet time)'):'');
 if(!s.ntp&&!window.timeSent){window.timeSent=1;fetch('/api/settime?epoch='+Math.floor(Date.now()/1000),{method:'POST'})}
-$('nstat').textContent=s.isnight?'(it is night now: screen off)':'';
+$('nstat').textContent=s.isnight?t('(it is night now: screen off)'):'';
 if(!busy&&!dirty){$('alon').checked=s.alon;setTime('al',s.atime);for(let i=0;i<7;i++)$('ad'+i).checked=!!((s.adays>>i)&1);$('alsnz').value=s.asnz;$('alvol').value=s.avol;$('alvv').textContent=s.avol;$('night').checked=s.night;setTime('nstart',s.nstart);setTime('nend',s.nend);$('tz').value=s.tz;$('dfmt').value=s.dfmt;$('inv').checked=s.inv;$('swaprb').checked=s.swaprb;$('motion').checked=s.motion;$('mmin').value=s.mmin;$('msens').value=s.msens;$('msv').textContent=s.msens;$('h24').checked=s.h24;$('auto').checked=s.auto;$('aint').value=s.aint;if(document.activeElement!==$('host'))$('host').value=s.host;$('hl').textContent=s.host;$('snd').checked=s.snd;$('sbub').checked=s.sbub;$('sdiv').checked=s.sdiv;$('sfeed').checked=s.sfeed;$('vol').value=s.vol;$('vv').textContent=s.vol;$('rot').value=s.rot}
- $('alstat').textContent=['','sunrise starting\u2026','RINGING','snoozed'][s.alstate]||(s.almiss?'last alarm was not stopped':'');
- $('st').textContent='v'+s.ver+' · WiFi '+(s.ssid||'?')+' · '+s.ip+' · '+s.rssi+' dBm · up '+Math.floor(s.up/60)+' min (last restart: '+s.rst+') · '+s.fps.toFixed(1)+' fps'}
-async function send(){if(!$('mmin').value||!$('aint').value){$('amsg').textContent='enter a number in the sleep / auto feed boxes';return}
-busy=1;await fetch('/api/set?snd='+($('snd').checked?1:0)+'&sbub='+($('sbub').checked?1:0)+'&sdiv='+($('sdiv').checked?1:0)+'&sfeed='+($('sfeed').checked?1:0)+'&vol='+$('vol').value+'&rot='+$('rot').value+'&motion='+($('motion').checked?1:0)+'&mmin='+$('mmin').value+'&msens='+$('msens').value+'&inv='+($('inv').checked?1:0)+'&swaprb='+($('swaprb').checked?1:0)+'&night='+($('night').checked?1:0)+'&nstart='+getTime('nstart')+'&nend='+getTime('nend')+'&tz='+encodeURIComponent($('tz').value)+'&dfmt='+$('dfmt').value+'&h24='+($('h24').checked?1:0)+'&auto='+($('auto').checked?1:0)+'&aint='+$('aint').value+'&alon='+($('alon').checked?1:0)+'&atime='+getTime('al')+'&adays='+[0,1,2,3,4,5,6].reduce((a,i)=>a+($('ad'+i).checked?1<<i:0),0)+'&asnz='+$('alsnz').value+'&avol='+$('alvol').value,{method:'POST'});busy=0;dirty=0;$('amsg').textContent='Applied \u2713'}
-const mark=()=>{dirty=1;$('amsg').textContent='not applied yet'};
+ $('alstat').textContent=['',t('sunrise starting\u2026'),t('RINGING'),t('snoozed')][s.alstate]||(s.almiss?t('last alarm was not stopped'):'');
+ $('st').textContent='v'+s.ver+' · WiFi '+(s.ssid||'?')+' · '+s.ip+' · '+s.rssi+' dBm · '+t('up ')+Math.floor(s.up/60)+t(' min (last restart: ')+s.rst+') · '+s.fps.toFixed(1)+' fps'}
+async function send(){if(!$('mmin').value||!$('aint').value){$('amsg').textContent=t('enter a number in the sleep / auto feed boxes');return}
+busy=1;await fetch('/api/set?snd='+($('snd').checked?1:0)+'&sbub='+($('sbub').checked?1:0)+'&sdiv='+($('sdiv').checked?1:0)+'&sfeed='+($('sfeed').checked?1:0)+'&vol='+$('vol').value+'&rot='+$('rot').value+'&motion='+($('motion').checked?1:0)+'&mmin='+$('mmin').value+'&msens='+$('msens').value+'&inv='+($('inv').checked?1:0)+'&swaprb='+($('swaprb').checked?1:0)+'&night='+($('night').checked?1:0)+'&nstart='+getTime('nstart')+'&nend='+getTime('nend')+'&tz='+encodeURIComponent($('tz').value)+'&dfmt='+$('dfmt').value+'&h24='+($('h24').checked?1:0)+'&auto='+($('auto').checked?1:0)+'&aint='+$('aint').value+'&alon='+($('alon').checked?1:0)+'&atime='+getTime('al')+'&adays='+[0,1,2,3,4,5,6].reduce((a,i)=>a+($('ad'+i).checked?1<<i:0),0)+'&asnz='+$('alsnz').value+'&avol='+$('alvol').value,{method:'POST'});busy=0;dirty=0;$('amsg').textContent=t('Applied \u2713')}
+const mark=()=>{dirty=1;$('amsg').textContent=t('not applied yet')};
 ['alon','al_h','al_m','ad0','ad1','ad2','ad3','ad4','ad5','ad6','alsnz','alvol','snd','sbub','sdiv','sfeed','h24','auto','aint','rot','motion','mmin','msens','inv','swaprb','tz','dfmt','night','nstart_h','nstart_m','nend_h','nend_m'].forEach(i=>{$(i).onchange=mark;$(i).oninput=mark});$('vol').oninput=()=>{$('vv').textContent=$('vol').value;mark()};$('msens').oninput=()=>{$('msv').textContent=$('msens').value;mark()};$('apply').onclick=send;$('alvol').oninput=()=>{$('alvv').textContent=$('alvol').value;mark()};$('altest').onclick=()=>fetch('/api/alarm?cmd=test',{method:'POST'});$('alstop').onclick=()=>fetch('/api/alarm?cmd=stop',{method:'POST'});
-const CAUSE=['no motion','motion','touch','BOOT button','setting turned off','sensor offline','alarm'];
+const CAUSE=['no motion','motion','touch','BOOT button','setting turned off','sensor offline','alarm'].map(x=>()=>t(x));
 async function mlog(){try{const a=await (await fetch('/api/motionlog')).json();
- $('mlog').innerHTML=a.length?a.map(e=>((e.c&128)?(e.e?'\u25cb motion seen':'\u25cb quiet'):(e.e?'\u2600 woke':'\u263e slept'))+' \u00b7 '+(e.w||'up '+Math.floor(e.up/60)+' min')+' \u00b7 '+CAUSE[e.c&127]+((e.c&128)?' \u00b7 night mode, screen stays dark':'')).join('<br>'):'<small>No sleep/wake events yet.</small>'}catch(e){}}
-async function rlog(){try{const t=await (await fetch('/api/resetlog')).text();$('rlog').textContent=t.trim()||'None recorded.'}catch(e){}}
+ $('mlog').innerHTML=a.length?a.map(e=>((e.c&128)?(e.e?'\u25cb '+t('motion seen'):'\u25cb '+t('quiet')):(e.e?'\u2600 '+t('woke'):'\u263e '+t('slept')))+' \u00b7 '+(e.w||t('up ')+Math.floor(e.up/60)+' min')+' \u00b7 '+CAUSE[e.c&127]()+((e.c&128)?' \u00b7 '+t('night mode, screen stays dark'):'')).join('<br>'):'<small>'+t('No sleep/wake events yet.')+'</small>'}catch(e){}}
+async function rlog(){try{const x=await (await fetch('/api/resetlog')).text();$('rlog').textContent=x.trim()||t('None recorded.')}catch(e){}}
 $('rlogclr').onclick=async()=>{await fetch('/api/resetlog?clear=1');rlog()};
 rlog();
 $('mclr').onclick=async()=>{await fetch('/api/motionlog/clear',{method:'POST'});mlog()};
@@ -708,22 +727,31 @@ async function shot(){const r=await fetch('/api/frame',{cache:'no-store'});const
  if(b.length!=W*H*2)return;const cv=$('cv');cv.width=W;cv.height=H;const x=cv.getContext('2d'),im=x.createImageData(W,H);
  for(let i=0,o=0;i<b.length;i+=2,o+=4){const v=(b[i]<<8)|b[i+1];im.data[o]=((v>>11)&31)*255/31;im.data[o+1]=((v>>5)&63)*255/63;im.data[o+2]=(v&31)*255/31;im.data[o+3]=255}
  x.putImageData(im,0,0);cv.style.display='block';
- cv.toBlob(bl=>{const a=$('dl');a.href=URL.createObjectURL(bl);a.download='fishtank-'+new Date().toISOString().replace(/[:.]/g,'-').slice(0,19)+'.png';a.textContent='Download PNG';a.style.display='inline-block'})}
+ cv.toBlob(bl=>{const a=$('dl');a.href=URL.createObjectURL(bl);a.download='fishtank-'+new Date().toISOString().replace(/[:.]/g,'-').slice(0,19)+'.png';a.textContent=t('Download PNG');a.style.display='inline-block'})}
 $('shot').onclick=shot;
 $('live').onchange=()=>{clearInterval(window.lv);if($('live').checked){shot();window.lv=setInterval(shot,2500)}};
-$('wifi').onclick=async()=>{if(!confirm('Forget all saved WiFi networks and restart? You will set up WiFi again on the screen.'))return;await fetch('/api/wifi/forget',{method:'POST'});$('sysmsg').textContent='Restarting\u2026'};
-$('recal').onclick=async()=>{if(!confirm('Restart and calibrate the touch screen again?'))return;await fetch('/api/recal',{method:'POST'});$('sysmsg').textContent='Restarting\u2026'};
-$('settime').onclick=async()=>{await fetch('/api/settime?epoch='+Math.floor(Date.now()/1000),{method:'POST'});$('tmsg').textContent='time set \u2713';load()};
+$('wifi').onclick=async()=>{if(!confirm(t('Forget all saved WiFi networks and restart? You will set up WiFi again on the screen.')))return;await fetch('/api/wifi/forget',{method:'POST'});$('sysmsg').textContent=t('Restarting\u2026')};
+$('recal').onclick=async()=>{if(!confirm(t('Restart and calibrate the touch screen again?')))return;await fetch('/api/recal',{method:'POST'});$('sysmsg').textContent=t('Restarting\u2026')};
+$('settime').onclick=async()=>{await fetch('/api/settime?epoch='+Math.floor(Date.now()/1000),{method:'POST'});$('tmsg').textContent=t('time set \u2713');load()};
 $('chest').onclick=()=>fetch('/api/chest',{method:'POST'});
 $('diver').onclick=()=>fetch('/api/diver',{method:'POST'});
 $('feed').onclick=()=>fetch('/api/feed',{method:'POST'});
 $('hsave').onclick=async()=>{const h=$('host').value.trim().toLowerCase();
  const r=await fetch('/api/host?host='+encodeURIComponent(h),{method:'POST'});
  if(!r.ok){$('hmsg').textContent=(await r.json()).error;return}
- $('hmsg').textContent='Rebooting\u2026';clearInterval(window.poll);
+ $('hmsg').textContent=t('Rebooting\u2026');clearInterval(window.poll);
  const cands=[location.origin,'http://'+h+'.local'];
  setTimeout(()=>{window.poll=setInterval(async()=>{for(const o of cands){try{const s=await (await fetch(o+'/api/status',{cache:'no-store'})).json();
   if(s.host===h){clearInterval(window.poll);location.href=o+'/';return}}catch(e){}}},2000)},4000)};
+function applyLang(){
+ document.documentElement.lang=lang;
+ ['nstart','nend','al'].forEach(id=>{const h=$(id+'_h'),v=h.value;h.innerHTML='';fillTime(id);if(v!=='')h.value=v});
+ buildDays();trText();
+ $('lEN').classList.toggle('on',lang==='en');$('lES').classList.toggle('on',lang==='es');
+ }
+async function setLang(l){lang=l;applyLang();langBusy=1;try{await fetch('/api/set?lang='+l,{method:'POST'})}catch(e){}langBusy=0}
+$('lEN').onclick=()=>setLang('en');$('lES').onclick=()=>setLang('es');
+applyLang();
 load();setInterval(load,5000);
 </script></main></body></html>)HTML";
 
@@ -830,9 +858,9 @@ static String statusJson() {
            g_h24 ? "true" : "false", ssid.c_str(), g_snd ? "true" : "false", (int)g_vol, g_rot, g_auto ? "true" : "false", g_aint, g_host.c_str(), WiFi.localIP().toString().c_str(), WiFi.RSSI(), millis() / 1000UL, g_fps);
   String o(b);
   o.remove(o.length() - 1);
-  char a[200];
-  snprintf(a, sizeof(a), ",\"sbub\":%s,\"sdiv\":%s,\"sfeed\":%s,\"alon\":%s,\"atime\":\"%02d:%02d\",\"adays\":%d,\"asnz\":%d,\"avol\":%d,\"alstate\":%d,\"almiss\":%s}",
-           g_sBub ? "true" : "false", g_sDiv ? "true" : "false", g_sFeed ? "true" : "false",
+  char a[240];
+  snprintf(a, sizeof(a), ",\"lang\":\"%s\",\"sbub\":%s,\"sdiv\":%s,\"sfeed\":%s,\"alon\":%s,\"atime\":\"%02d:%02d\",\"adays\":%d,\"asnz\":%d,\"avol\":%d,\"alstate\":%d,\"almiss\":%s}",
+           isES() ? "es" : "en", g_sBub ? "true" : "false", g_sDiv ? "true" : "false", g_sFeed ? "true" : "false",
            g_alOn ? "true" : "false", g_alMin / 60, g_alMin % 60, g_alDays, g_alSnz, g_alVol, (int)alState, alMissed ? "true" : "false");
   return o + a;
 }
@@ -883,6 +911,7 @@ static void setupWeb() {
   });
   server.on("/api/set", HTTP_ANY, []() {
     int v;
+    if (server.hasArg("lang")) wifiSetLang(server.arg("lang") == "es");
     if (numArg("vol", 0, 100, v)) g_vol = v;
     if (numArg("snd", 0, 1, v)) g_snd = v != 0;
     if (numArg("sbub", 0, 1, v)) g_sBub = v != 0;
@@ -1215,7 +1244,7 @@ static void drawAlarmScreen(float t, uint32_t now) {
   drawDigits(VW / 2, 80, 78, h12, mm, g_h24, colon, RGB(255, 244, 205));
   cv.setTextDatum(TC_DATUM);
   if (ap) { cv.setTextColor(RGB(255, 244, 205)); cv.drawString(ap + 1, VW / 2, 166, 4); }
-  if (alState == AL_RING) { cv.setTextColor(RGB(255, 255, 255)); cv.drawString("Time to get up!", VW / 2, 28, 4); }
+  if (alState == AL_RING) { cv.setTextColor(RGB(255, 255, 255)); cv.drawString(isES() ? "Hora de levantarse!" : "Time to get up!", VW / 2, 28, 4); }
   cv.fillRoundRect(BTN_SNZ_X, BTN_Y, BTN_W, BTN_H, 12, RGB(40, 90, 150));
   cv.fillRoundRect(BTN_STOP_X, BTN_Y, BTN_W, BTN_H, 12, RGB(190, 40, 40));
   cv.drawRoundRect(BTN_SNZ_X, BTN_Y, BTN_W, BTN_H, 12, RGB(190, 220, 255));
@@ -1224,9 +1253,9 @@ static void drawAlarmScreen(float t, uint32_t now) {
   cv.setTextDatum(MC_DATUM);
   char sb[16];
   snprintf(sb, sizeof(sb), "%d min", g_alSnz);
-  cv.drawString("Snooze", BTN_SNZ_X + BTN_W / 2, BTN_Y + 20, 4);
+  cv.drawString(isES() ? "Posponer" : "Snooze", BTN_SNZ_X + BTN_W / 2, BTN_Y + 20, 4);
   cv.drawString(sb, BTN_SNZ_X + BTN_W / 2, BTN_Y + 43, 2);
-  cv.drawString("Stop", BTN_STOP_X + BTN_W / 2, BTN_Y + BTN_H / 2, 4);
+  cv.drawString(isES() ? "Parar" : "Stop", BTN_STOP_X + BTN_W / 2, BTN_Y + BTN_H / 2, 4);
 }
 
 // On-screen alarm setter: tap the time in the corner.
@@ -1237,7 +1266,7 @@ static void drawAlarmPanel() {
   cv.drawRoundRect(70, 22, 340, 276, 14, acc);
   cv.setTextDatum(TC_DATUM);
   cv.setTextColor(fg);
-  cv.drawString("Alarm clock", 240, 32, 4);
+  cv.drawString(isES() ? "Despertador" : "Alarm clock", 240, 32, 4);
   float x0, hC, mC;
   digitsGeom(240, PANEL_DIG_H, x0, hC, mC);
   const int h24 = g_alMin / 60, mm = g_alMin % 60;
@@ -1255,11 +1284,11 @@ static void drawAlarmPanel() {
   }
   cv.setTextDatum(MC_DATUM);
   cv.fillRoundRect(90, 244, 130, 42, 10, g_alOn ? RGB(30, 130, 70) : RGB(90, 100, 115));
-  cv.drawString(g_alOn ? "Alarm ON" : "Alarm OFF", 155, 265, 4);
+  cv.drawString(g_alOn ? (isES() ? "Alarma SI" : "Alarm ON") : (isES() ? "Alarma NO" : "Alarm OFF"), 155, 265, 4);
   cv.fillRoundRect(260, 244, 130, 42, 10, RGB(40, 90, 150));
-  cv.drawString("Done", 325, 265, 4);
+  cv.drawString(isES() ? "Listo" : "Done", 325, 265, 4);
   cv.setTextColor(RGB(150, 180, 210));
-  cv.drawString("days and loudness: web page", 240, 224, 2);
+  cv.drawString(isES() ? "dias y volumen: pagina web" : "days and loudness: web page", 240, 224, 2);
 }
 
 // Touch while the panel is open. Arrows repeat while held; the buttons act once.

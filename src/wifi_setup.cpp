@@ -77,3 +77,8 @@ void wifiSetupLoop() {
 void wifiForgetAll() {
   for (const String &s : TouchWifiProvisioner::savedNetworks()) TouchWifiProvisioner::forget(s);
 }
+
+bool wifiLangIsSpanish() { return TouchWifiProvisioner::language() == TouchWifiProvisioner::Language::Spanish; }
+void wifiSetLang(bool spanish) {
+  TouchWifiProvisioner::setLanguage(spanish ? TouchWifiProvisioner::Language::Spanish : TouchWifiProvisioner::Language::English);
+}

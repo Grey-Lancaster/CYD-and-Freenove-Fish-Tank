@@ -266,7 +266,11 @@ bool halTouch(int &x, int &y) {
   // The touch clock (GPIO25) is also the DAC1 pin next to the speaker: clocking the controller every frame put a
   // regular tick under the sound. The controller pulls IRQ low while pressed, so only talk to it then.
   pinMode(XPT2046_IRQ, INPUT);
-  if (digitalRead(XPT2046_IRQ) != LOW) return false;
+  // On some boards IRQ never reads low (calibration still works without it), so also poll every 80 ms regardless.
+  static uint32_t lastPoll = 0;
+  uint32_t nowMs = millis();
+  if (digitalRead(XPT2046_IRQ) != LOW && nowMs - lastPoll < 80) return false;
+  lastPoll = nowMs;
   xptBegin();                    // sound can disturb these pins; cheap to reassert
   RawTouch p;
   if (!rawTouched(p)) return false;
