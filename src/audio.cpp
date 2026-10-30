@@ -1,10 +1,7 @@
 #include "audio.h"
 #include "hal.h"
 
-#ifdef BOARD_CYD28      // the CYD plays its own 44.1 kHz 8-bit ambience loop (see audioBubbles44)
-extern const uint8_t cydBub_start[] asm("_binary_src_bubbles_cyd_wav_start");
-extern const uint8_t cydBub_end[] asm("_binary_src_bubbles_cyd_wav_end");
-#else
+#ifndef BOARD_CYD28     // the CYD synthesises its own 44.1 kHz ambience (see audioBubbles44)
 extern const uint8_t bubbles_start[] asm("_binary_src_bubbles_raw_start");
 extern const uint8_t bubbles_end[] asm("_binary_src_bubbles_raw_end");
 #endif
@@ -76,10 +73,13 @@ static int32_t alarmSample(uint32_t n) {
 
 #ifdef BOARD_CYD28
 // The CYD's 8-bit DAC needs the ambience at a high sample rate (like PhotoFrame's 44.1 kHz WAV), so it is a
-// separate stream mixed in by the HAL at 44.1 kHz, not part of the 16 kHz mixer. 10 s of 8-bit mono.
-static volatile int g_bubMode = 2, g_bubGain = 1;   // 2 = synthesised bubbles, 1 = the recorded loop, 0 = off
+// separate stream mixed in by the HAL at 44.1 kHz, not part of the 16 kHz mixer. It is synthesised: the CYD speaker
+// plays almost nothing below ~1 kHz, and everything tried that lives there sounded bad on it (Grey's aquarium recording
+// as is, denoised, sped up, or pitched up 2-3 octaves; the Freenove bubbles file; gliding "bloops" like it at 1-2x its
+// pitch). Mode: 0 = off, anything else = on.
+static volatile int g_bubMode = 2, g_bubGain = 1;
 void audioBubMode(int m, int g) { g_bubMode = m; if (g >= 1 && g <= 16) g_bubGain = g; }
-// Synthesised bubbles (mode 2, the default). Each bubble has a random size: small ones ring high and short, big ones
+// Synthesised bubbles. Each bubble has a random size: small ones ring high and short, big ones
 // lower and longer (a damped sine with a slight upward glide), with a tiny noise splash at the start. They come in
 // fast bursts of mostly small bubbles with the occasional big blob, then a pause. No loop, so nothing repeats.
 static void bubblesSynth(int16_t *out, int n, bool on) {
@@ -123,37 +123,8 @@ static void bubblesSynth(int16_t *out, int n, bool on) {
 }
 
 void audioBubbles44(int16_t *out, int n) {
-  if (g_bubMode == 2) {
-    bubblesSynth(out, n, g_snd && g_sBub && !g_asleep && !g_isNight);
-    for (int i = 0; i < n; i++) out[i] = (int16_t)constrain(((int32_t)out[i] * g_vol * g_bubGain) / 60, -32768, 32767);
-    return;
-  }
-  // src/bubbles_cyd.wav is mono 16-bit at 11.025 kHz (design/make_bubbles.py): 4 output samples per source sample at
-  // 44.1 kHz, linearly interpolated. The loop's seam is already blended in the file.
-  static const uint8_t *pcm = nullptr; static size_t len = 0, pos = 0;
-  static int ph = 0;
-  if (!pcm) {
-    const uint8_t *p = cydBub_start + 12;                      // skip "RIFF....WAVE"
-    while (p + 8 <= cydBub_end) {
-      const uint32_t sz = p[4] | (p[5] << 8) | (p[6] << 16) | ((uint32_t)p[7] << 24);
-      if (!memcmp(p, "data", 4)) { pcm = p + 8; len = min((size_t)sz, (size_t)(cydBub_end - pcm)) / 2; break; }
-      p += 8 + sz + (sz & 1);
-    }
-    if (!pcm) len = 0;
-  }
-  const bool on = len > 0 && g_snd && g_sBub && !g_asleep && !g_isNight && g_bubMode != 0;
-  for (int i = 0; i < n; i++) {
-    int32_t v = 0;
-    if (on) {
-      int16_t a, b;
-      memcpy(&a, pcm + pos * 2, 2);
-      memcpy(&b, pcm + (pos + 1 >= len ? 0 : pos + 1) * 2, 2);
-      const int32_t x = a + (((int32_t)b - a) * ph) / 4;
-      v = (x * g_vol * g_bubGain) / 60;                        // gain 1 = the file as it is at volume 60
-      if (++ph >= 4) { ph = 0; if (++pos >= len) pos = 0; }
-    }
-    out[i] = (int16_t)constrain(v, -32768, 32767);
-  }
+  bubblesSynth(out, n, g_bubMode != 0 && g_snd && g_sBub && !g_asleep && !g_isNight);
+  for (int i = 0; i < n; i++) out[i] = (int16_t)constrain(((int32_t)out[i] * g_vol * g_bubGain) / 60, -32768, 32767);
 }
 #else
 void audioBubMode(int, int) {}
