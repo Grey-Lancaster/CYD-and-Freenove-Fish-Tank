@@ -77,11 +77,61 @@ static int32_t alarmSample(uint32_t n) {
 #ifdef BOARD_CYD28
 // The CYD's 8-bit DAC needs the ambience at a high sample rate (like PhotoFrame's 44.1 kHz WAV), so it is a
 // separate stream mixed in by the HAL at 44.1 kHz, not part of the 16 kHz mixer. 10 s of 8-bit mono.
-static volatile int g_bubMode = 1, g_bubGain = 4;
+static volatile int g_bubMode = 2, g_bubGain = 1;   // 2 = synthesised bubbles, 1 = the recorded loop, 0 = off
 void audioBubMode(int m, int g) { g_bubMode = m; if (g >= 1 && g <= 16) g_bubGain = g; }
+// Synthesised bubbles (mode 2, the default). Each bubble has a random size: small ones ring high and short, big ones
+// lower and longer (a damped sine with a slight upward glide), with a tiny noise splash at the start. They come in
+// fast bursts of mostly small bubbles with the occasional big blob, then a pause. No loop, so nothing repeats.
+static void bubblesSynth(int16_t *out, int n, bool on) {
+  struct Voice { float ph, f, rise, amp, dec, splash, sdec; bool live; };
+  static Voice vs[12];
+  static uint32_t rnd = 2463534242u, wait = 22050, burst = 0;
+  static const float SR = 44100.0f;
+  auto rf = [&]() { rnd ^= rnd << 13; rnd ^= rnd >> 17; rnd ^= rnd << 5; return (rnd & 0xFFFF) / 65535.0f; };
+  auto spawn = [&]() {
+    for (Voice &v : vs) if (!v.live) {
+      const float r = 0.8f + 4.2f * powf(rf(), 2.2f);                       // radius in mm: mostly small, some big
+      v.f = constrain(3100.0f / r, 750.0f, 3800.0f);                       // small = high, big = low
+      v.ph = 0;
+      v.rise = 1.0f + (0.03f + 0.12f * rf()) / (0.015f * SR);
+      v.amp = (0.08f + 0.30f * rf()) * (0.6f + 0.1f * r);                  // very uneven loudness
+      v.dec = expf(-1.0f / ((0.0025f + 0.0022f * r) * SR));               // 3-12 ms, longer for big ones
+      v.splash = 0.18f * v.amp * (0.5f + rf());                            // the "pop" noise at the start
+      v.sdec = expf(-1.0f / (0.0008f * SR));
+      v.live = true;
+      return;
+    }
+  };
+  for (int i = 0; i < n; i++) {
+    if (wait == 0) {
+      spawn();
+      if (burst == 0) burst = 2 + (uint32_t)(10.0f * rf() * rf());       // a new burst of 2-12
+      if (--burst > 0) wait = (uint32_t)((0.006f + 0.05f * rf() * rf()) * SR);       // 6-56 ms, mostly quick
+      else wait = (uint32_t)((0.25f + 1.3f * rf()) * SR);                             // then a pause
+    } else wait--;
+    float sum = 0;
+    for (Voice &v : vs) if (v.live) {
+      rnd ^= rnd << 13; rnd ^= rnd >> 17; rnd ^= rnd << 5;
+      const float nz = ((int32_t)(rnd & 0xFFFF) - 32768) / 32768.0f;
+      sum += v.amp * sinC(v.ph) + v.splash * nz;
+      v.ph += v.f / SR; if (v.ph >= 1.0f) v.ph -= 1.0f;
+      v.f *= v.rise; v.amp *= v.dec; v.splash *= v.sdec;
+      if (v.amp < 0.004f) v.live = false;
+    }
+    out[i] = on ? (int16_t)constrain((int32_t)(sum * 32767.0f * 0.8f), -32768, 32767) : 0;
+  }
+}
+
 void audioBubbles44(int16_t *out, int n) {
-  // The file is played exactly as it is: mono, 44.1 kHz, 16-bit PCM WAV (the PhotoFrame spec). Find its data chunk.
+  if (g_bubMode == 2) {
+    bubblesSynth(out, n, g_snd && g_sBub && !g_asleep && !g_isNight);
+    for (int i = 0; i < n; i++) out[i] = (int16_t)constrain(((int32_t)out[i] * g_vol * g_bubGain) / 60, -32768, 32767);
+    return;
+  }
+  // src/bubbles_cyd.wav is mono 16-bit at 11.025 kHz (design/make_bubbles.py): 4 output samples per source sample at
+  // 44.1 kHz, linearly interpolated. The loop's seam is already blended in the file.
   static const uint8_t *pcm = nullptr; static size_t len = 0, pos = 0;
+  static int ph = 0;
   if (!pcm) {
     const uint8_t *p = cydBub_start + 12;                      // skip "RIFF....WAVE"
     while (p + 8 <= cydBub_end) {
@@ -95,17 +145,14 @@ void audioBubbles44(int16_t *out, int n) {
   for (int i = 0; i < n; i++) {
     int32_t v = 0;
     if (on) {
-      const size_t X = 2205;                                   // 50 ms: blend the end into the start so the loop point does not click
-      int16_t x; memcpy(&x, pcm + pos * 2, 2);
-      int32_t y = x;
-      if (len > 4 * X && pos >= len - X) {
-        int16_t h; memcpy(&h, pcm + (pos - (len - X)) * 2, 2);
-        y = ((int32_t)x * (int32_t)(len - pos) + (int32_t)h * (int32_t)(pos - (len - X))) / (int32_t)X;
-      }
-      v = (y * g_vol * g_bubGain) / 60;                        // gain 1 = the file as it is at volume 60; default x4, the recording is quiet
+      int16_t a, b;
+      memcpy(&a, pcm + pos * 2, 2);
+      memcpy(&b, pcm + (pos + 1 >= len ? 0 : pos + 1) * 2, 2);
+      const int32_t x = a + (((int32_t)b - a) * ph) / 4;
+      v = (x * g_vol * g_bubGain) / 60;                        // gain 1 = the file as it is at volume 60
+      if (++ph >= 4) { ph = 0; if (++pos >= len) pos = 0; }
     }
     out[i] = (int16_t)constrain(v, -32768, 32767);
-    if (on && ++pos >= len) pos = len > 4 * 2205 ? 2205 : 0;
   }
 }
 #else
