@@ -10,6 +10,7 @@ Use **Chrome or Edge on a computer**, plug the board in by USB, pick your board 
 | **Freenove 2.8"** | `freenove28` | Freenove FNK0104B/AB, ESP32-S3, ILI9341 320×240, capacitive touch, speaker |
 | **CYD 2.8"** | `cyd28` | ESP32-2432S028 with an ILI9341 display (one USB port) |
 | **CYD 2.8" 2-USB** | `cyd28usb2` | the same board with two USB ports and an ST7789 display (starts with red/blue swapped, as those panels need) |
+| **Freenove ESP32 Display 4.0"** | `cyd40` | Freenove ESP32 Display 4.0" (ESP32-32E, "FNK0103S" docs), ST7796 480×320, resistive touch, speaker. No PSRAM, so a few frames per second |
 
 Colours wrong on a CYD? You most likely picked the wrong CYD build; try the other one. Nothing is damaged.
 

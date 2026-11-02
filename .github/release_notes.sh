@@ -22,4 +22,4 @@ echo "- $FIRST"
 if [ -n "$(printf '%s' "$REST" | tr -d '[:space:]')" ]; then
   printf '%s\n' "$REST"
 fi
-echo "- Factory and update files for all four builds are attached."
+echo "- Factory and update files for all five builds are attached."

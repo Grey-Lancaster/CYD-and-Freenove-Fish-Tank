@@ -1,10 +1,13 @@
-// Board selection. Build envs: freenove4 (default), freenove28, cyd28 and cyd28usb2.
+// Board selection. Build envs: freenove4 (default), freenove28, cyd28, cyd28usb2 and cyd40.
 #pragma once
 
 // 2-USB CYDs (ST7789) show red and blue swapped with the stock colour order, so that build starts with the swap on.
 #if defined(ST7789_DRIVER)
   #define DEFAULT_SWAPRB true
   #define BOARD_ID "cyd28usb2"
+#elif defined(BOARD_CYD40)
+  #define DEFAULT_SWAPRB false
+  #define BOARD_ID "cyd40"
 #elif defined(BOARD_CYD28)
   #define DEFAULT_SWAPRB false
   #define BOARD_ID "cyd28"
@@ -16,7 +19,21 @@
   #define BOARD_ID "freenove4"
 #endif
 
-#if defined(BOARD_CYD28)
+#if defined(BOARD_CYD40)
+  // Freenove ESP32 Display 4.0" (ESP32-32E, no PSRAM): ST7796 480x320, XPT2046 resistive touch. CYD code, 4" panel.
+  #define BOARD_NAME "CYD 4.0"
+  #define PANEL_W 480
+  #define PANEL_H 320
+  #define STRIP_H 32            // 320 / 32 = 10 strips
+  #define ROT_LEFT 3
+  #define ROT_RIGHT 1
+  #define DEFAULT_ROT ROT_LEFT
+  #define DEFAULT_HOST "cydfishtank40"
+  #define TIME_Y 8
+  #define DATE_Y 37
+  #define FONT_BIG 4
+  #define FONT_SMALL 2
+#elif defined(BOARD_CYD28)
   #define BOARD_NAME "CYD 2.8"
   #define PANEL_W 320
   #define PANEL_H 240

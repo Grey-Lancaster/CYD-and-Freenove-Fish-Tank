@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Animated fake aquarium firmware (PlatformIO / Arduino / ESP32) for four touchscreen boards, one codebase. Public repo: Grey-Lancaster/CYD-and-Freenove-Fish-Tank. Read `README.md` first; it is current and has the feature list.
+Animated fake aquarium firmware (PlatformIO / Arduino / ESP32) for five touchscreen boards, one codebase. Public repo: Grey-Lancaster/CYD-and-Freenove-Fish-Tank. Read `README.md` first; it is current and has the feature list.
 
 ## Boards = PlatformIO envs
 | Env | Board |
@@ -9,6 +9,7 @@ Animated fake aquarium firmware (PlatformIO / Arduino / ESP32) for four touchscr
 | `freenove28` | Freenove FNK0104B/AB 2.8", ILI9341 |
 | `cyd28` | CYD 2.8", ILI9341, one USB port |
 | `cyd28usb2` | CYD 2.8", ST7789, two USB ports |
+| `cyd40` | Freenove ESP32 Display 4.0" (ESP32-32E, no PSRAM), ST7796 480x320, resistive XPT2046 touch on the display SPI bus, amp enable GPIO4 |
 
 Wrong colours on a CYD almost always means the wrong env (driver), not the invert/swap-RGB toggles.
 

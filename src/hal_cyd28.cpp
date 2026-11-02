@@ -109,6 +109,7 @@ struct RawTouch {
   uint16_t xRaw, yRaw, zRaw;
 };
 
+#ifndef BOARD_CYD40
 static void xptWrite(uint8_t cmd) {
   for (int i = 7; i >= 0; i--) {
     digitalWrite(XPT2046_MOSI, cmd & (1 << i));
@@ -133,6 +134,7 @@ static uint16_t xptConvert(uint8_t cmd) {
   }
   return v >> 4;
 }
+#endif
 
 static uint16_t median3(uint16_t a, uint16_t b, uint16_t c) {
   if (a > b) { uint16_t t = a; a = b; b = t; }
@@ -140,6 +142,22 @@ static uint16_t median3(uint16_t a, uint16_t b, uint16_t c) {
   return a > b ? a : b;
 }
 
+#ifdef BOARD_CYD40
+// 4" board: the XPT2046 shares the display's SPI pins (CLK 14, MOSI 13, MISO 12, CS 33), so it cannot be bit-banged
+// without detaching the display. TFT_eSPI talks to it on the same bus (TOUCH_CS) and keeps the display deselected.
+static void xptBegin() {}
+
+static bool rawTouched(RawTouch &p) {
+  const uint16_t z = tft.getTouchRawZ();
+  if (z < 400) return false;
+  uint16_t x[3], y[3];
+  for (int k = 0; k < 3; k++) tft.getTouchRaw(&x[k], &y[k]);
+  p.xRaw = median3(x[0], x[1], x[2]);
+  p.yRaw = median3(y[0], y[1], y[2]);
+  p.zRaw = z;
+  return true;
+}
+#else
 static void xptBegin() {
   pinMode(XPT2046_MOSI, OUTPUT);
   pinMode(XPT2046_MISO, INPUT);
@@ -171,7 +189,7 @@ static bool rawTouched(RawTouch &p) {
   p.zRaw = z;
   return true;
 }
-
+#endif
 
 static bool loadAff() {
   Preferences p;
@@ -265,12 +283,14 @@ void halRecalibrateTouch() {
 bool halTouch(int &x, int &y) {
   // The touch clock (GPIO25) is also the DAC1 pin next to the speaker: clocking the controller every frame put a
   // regular tick under the sound. The controller pulls IRQ low while pressed, so only talk to it then.
+#ifndef BOARD_CYD40              // the 4" board's touch clock is the display clock: no tick, and polling is cheap
   pinMode(XPT2046_IRQ, INPUT);
   // On some boards IRQ never reads low (calibration still works without it), so also poll every 80 ms regardless.
   static uint32_t lastPoll = 0;
   uint32_t nowMs = millis();
   if (digitalRead(XPT2046_IRQ) != LOW && nowMs - lastPoll < 80) return false;
   lastPoll = nowMs;
+#endif
   xptBegin();                    // sound can disturb these pins; cheap to reassert
   RawTouch p;
   if (!rawTouched(p)) return false;
@@ -339,7 +359,15 @@ void halAudioStart() {
   cfg.use_apll = false;
   cfg.tx_desc_auto_clear = true;
   if (i2s_driver_install(I2S_NUM_0, &cfg, 0, NULL) != ESP_OK) { Serial.println("I2S install failed"); return; }
+#ifdef BOARD_CYD40
+  // 4" board: the speaker amplifier has an enable pin (GPIO4, active low, as in Freenove's sketch) and the touch
+  // chip is on the display bus, so both DAC pins are free: drive both like Freenove's AudioOutputI2S(0, 1).
+  pinMode(4, OUTPUT);
+  digitalWrite(4, LOW);
+  i2s_set_dac_mode(I2S_DAC_CHANNEL_BOTH_EN);
+#else
   i2s_set_dac_mode(I2S_DAC_CHANNEL_LEFT_EN);   // GPIO26 only; GPIO25 is the touch controller's clock
+#endif
   xTaskCreatePinnedToCore(audioTask, "bubbles", 4096, NULL, 2, NULL, 1);   // core 1 like PhotoFrame: core 0 is busy with WiFi
 }
 #endif
